@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="configver" type="int" value="2"/>
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=6;x=0;y=0"/>
+      <property name="length" type="uint" value="2"/>
+      <property name="length-adjust" type="bool" value="false"/>
+      <property name="size" type="uint" value="22"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="icon-size" type="uint" value="14"/>
+      <property name="background-style" type="uint" value="1"/>
+      <property name="background-rgba" type="array">
+        <value type="double" value="0"/>
+        <value type="double" value="0"/>
+        <value type="double" value="0"/>
+        <value type="double" value="0"/>
+      </property>
+      <property name="background-alpha" type="uint" value="0"/>
+      <property name="enter-opacity" type="uint" value="100"/>
+      <property name="leave-opacity" type="uint" value="100"/>
+      <property name="autohide-behavior" type="uint" value="0"/>
+      <property name="span-monitors" type="bool" value="false"/>
+      <property name="mode" type="uint" value="0"/>
+      <property name="disable-struts" type="bool" value="true"/>
+      <property name="plugin-ids" type="array">
+        <value type="int" value="1"/>
+      </property>
+    </property>
+  </property>
+  <property name="plugins" type="empty">
+    <property name="plugin-1" type="string" value="applicationsmenu">
+      <property name="show-button-title" type="bool" value="false"/>
+      <property name="show-button-icon" type="bool" value="true"/>
+      <property name="show-generic-names" type="bool" value="false"/>
+      <property name="show-menu-icons" type="bool" value="true"/>
+      <property name="show-tooltips" type="bool" value="false"/>
+      <property name="button-icon" type="string" value="org.xfce.panel.applicationsmenu"/>
+    </property>
+  </property>
+</channel>

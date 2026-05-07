@@ -1,0 +1,51 @@
+[PlankDockPreferences]
+#The names of .dockitems in this dock, in display order.
+DockItems=chrome.dockitem;;thunar.dockitem;;xfce4-terminal.dockitem
+
+#Whether to show only windows of the current workspace.
+CurrentWorkspaceOnly=false
+
+#The size of dock icons (in pixels).
+IconSize=44
+
+#If 0, hide the dock.  Otherwise show the dock.
+HideMode=0
+
+#Time (in ms) to wait before unhiding the dock.
+UnhideDelay=0
+
+#Time (in ms) to wait before hiding the dock.
+HideDelay=0
+
+#The monitor number for the dock.  Use -1 to keep on the primary monitor.
+Monitor=
+
+#The name of the dock's theme to use.
+Theme=Transparent
+
+#The alignment for the dock on the monitor's edge.  Possible values are: 'panel-mode-center', 'panel-mode-fill', 'panel-mode-start' or 'panel-mode-end'.
+Alignment=panel-mode-center
+
+#The position for the dock on the monitor.  Possible values are: 'left', 'right', 'top', 'bottom'.
+Position=bottom
+
+#The dock's position offset from center (in percent).
+Offset=0
+
+#The alignment of the items in this dock if its Alignment is set to 'Fill'.  Possible values are: 'panel-mode-center', 'panel-mode-fill', 'panel-mode-start' or 'panel-mode-end'.
+ItemsAlignment=panel-mode-center
+
+#Whether to show only pinned applications.
+LockItems=false
+
+#Whether to prevent drag'n'drop actions and lock items on the dock.
+NoGlow=false
+
+#Whether to draw a glow effect on icons when running applications.
+PressureReveal=false
+
+#Whether to use pressure-based revealing of the dock if the input device supports it.
+ZoomEnabled=true
+
+#The dock's icon-zoom (in percent).
+ZoomPercent=130

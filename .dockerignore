@@ -1,0 +1,11 @@
+.git
+.gitignore
+.dockerignore
+README.md
+*.md
+__pycache__
+*.pyc
+.venv
+.idea
+.vscode
+docker-compose.override.yml
