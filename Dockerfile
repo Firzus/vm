@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         dbus-x11 \
         xvfb x11vnc \
         novnc websockify \
-        xdotool wmctrl scrot imagemagick xclip xdg-utils \
+        xdotool wmctrl scrot imagemagick xclip xdg-utils socat \
         xfonts-base xfonts-100dpi xfonts-75dpi \
         fonts-noto fonts-noto-color-emoji fonts-liberation fonts-inter \
         arc-theme papirus-icon-theme \
