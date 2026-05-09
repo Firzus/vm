@@ -10,6 +10,7 @@ services:
       - "5901:5901"
       - "6080:6080"
       - "8000:8000"
+      - "9222:9222"
     environment:
       SCREEN_WIDTH: "1920"
       SCREEN_HEIGHT: "1080"

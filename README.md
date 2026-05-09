@@ -142,6 +142,44 @@ install line to the `Dockerfile` and rebuild.
   exported to an ext4 rootfs and booted with `firecracker` or shipped to
   Fly.io Machines unchanged.
 
+## Driving the VM from an AI agent (MCP)
+
+For agent-style usage (Claude Desktop, Claude Code, Cursor, ...), two MCP
+servers are wired up at the repo root — `.mcp.json` (Claude Code project
+scope) and `.cursor/mcp.json` (Cursor project scope) — so the agent picks
+them up automatically when the repo is opened. They have **distinct
+purposes** and are independent of each other:
+
+- **`cursor-vm`** ([`mcp-server/`](./mcp-server)) — drives the desktop
+  inside the VM (click, type, screenshot, shell) and the VM lifecycle on
+  the host (`vm_up`, `vm_down`, `vm_reset`, ...). This is the server the
+  install/uninstall/reset loop uses.
+- **`chrome-devtools`** — Google's
+  [`chrome-devtools-mcp@latest`](https://github.com/ChromeDevTools/chrome-devtools-mcp),
+  pointed at Chrome inside the VM via `--browserUrl=http://127.0.0.1:9222`.
+  Use it for **frontend analysis** (network, console, performance,
+  accessibility snapshots). It has nothing to do with the install/uninstall
+  loop. Before using it, call `cursor-vm.launch_chrome_debug` once to
+  start Chrome with the DevTools port attached (a `socat` bridge republishes
+  Chrome's loopback CDP on `0.0.0.0:9222` so the host can reach it).
+
+### The install / uninstall / reset loop
+
+Uses **only `cursor-vm`**:
+
+```text
+vm_reset → curl/open_url(download_url) → list_downloads → install_deb
+        → screenshot → uninstall_apt → vm_reset
+```
+
+A ready-to-use Claude Code skill that walks an agent through this loop is
+provided at
+[`.claude/skills/vm-test-app-install/SKILL.md`](./.claude/skills/vm-test-app-install/SKILL.md).
+Default target: Opera GX from `https://operagx.gg/Huzounetaff`.
+
+See [`mcp-server/README.md`](./mcp-server/README.md) for setup and the full
+tool list.
+
 ## Project layout
 
 ```text
@@ -149,11 +187,22 @@ vm/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .dockerignore
+├── .mcp.json                 MCP servers for Claude Code (project scope)
+├── .cursor/mcp.json          MCP servers for Cursor (project scope)
 ├── entrypoint.sh
 ├── README.md
-├── automation/
+├── automation/               FastAPI server running inside the container
 │   ├── requirements.txt
 │   └── server.py
+├── mcp-server/               cursor-vm MCP server (host)
+│   ├── requirements.txt
+│   ├── server.py
+│   ├── smoke_test_cursor_vm.py
+│   ├── smoke_test_cdm.py
+│   └── README.md
+├── .claude/
+│   └── skills/
+│       └── vm-test-app-install/SKILL.md   Install/uninstall/reset loop skill
 └── ui/                       Next.js console (Cursor-style remote desktop UI)
     ├── package.json
     └── src/
