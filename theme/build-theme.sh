@@ -1,35 +1,28 @@
 #!/usr/bin/env bash
-# Build a Cursor-style desktop look:
-#  - Wallpaper: dark gradient mesh (4 blurred blobs) for ambient depth
-#  - xfwm4 theme: macOS-style titlebar (full tile set + traffic-light dots)
-#  - GTK theme: Arc-Dark
-#  - Icons: Papirus-Dark
-#  - Cursor: Bibata-Modern-Ice (configured later in xsettings)
+# Editorial Swiss desktop look:
+#  - Wallpaper: pre-generated paper composition (COPY'd in Dockerfile)
+#  - xfwm4 theme: ivory titlebars + vermilion-trio traffic lights
+#  - GTK theme: Arc (light)
+#  - Icons: Papirus (light)
+#  - Cursor: Bibata-Modern-Classic
+#  - Plank theme: EditorialSwiss (paper card + vermilion active indicator)
 
 set -euo pipefail
 
 WALL_DIR=/usr/share/backgrounds/cursor-style
 mkdir -p "${WALL_DIR}"
+# Wallpaper PNG already lives at ${WALL_DIR}/cursor-paper.png (Dockerfile COPY).
 
-# Dark gradient mesh: 3 large blurred blobs over a near-black base.
-# Same idea as the Cursor reference wallpaper, but in our dark identity.
-convert -size 1920x1080 xc:'#0a0a0c' \
-    -fill '#1a1422' -draw 'circle 480,300 720,540' \
-    -fill '#0d1822' -draw 'circle 1440,800 1620,1020' \
-    -fill '#181018' -draw 'circle 960,500 1100,640' \
-    -blur 0x180 \
-    "${WALL_DIR}/cursor-dark.png"
-
-THEME_DIR=/usr/share/themes/CursorStyle
+THEME_DIR=/usr/share/themes/EditorialSwiss
 mkdir -p "${THEME_DIR}/xfwm4"
 
 cat > "${THEME_DIR}/xfwm4/themerc" <<'EOF'
-# CursorStyle xfwm4 theme — macOS-style dark titlebar
+# EditorialSwiss xfwm4 theme — ivory titlebars, vermilion-trio dots
 button_layout=CHM|T
-button_offset=8
-button_spacing=4
-title_alignment=center
-title_horizontal_offset=0
+button_offset=10
+button_spacing=6
+title_alignment=left
+title_horizontal_offset=4
 title_vertical_offset_active=4
 title_vertical_offset_inactive=4
 full_width_title=true
@@ -38,8 +31,8 @@ shadow_delta_height=0
 shadow_delta_width=0
 shadow_delta_x=0
 shadow_delta_y=0
-active_text_color=#e6e6ea
-inactive_text_color=#888892
+active_text_color=#0a0a0a
+inactive_text_color=#5a544a
 title_shadow_active=false
 title_shadow_inactive=false
 show_app_icon=false
@@ -48,33 +41,28 @@ EOF
 cat > "${THEME_DIR}/index.theme" <<'EOF'
 [Desktop Entry]
 Type=X-GNOME-Metatheme
-Name=CursorStyle
-Comment=Minimal dark window decorations matching the Cursor cloud-agent UI
+Name=EditorialSwiss
+Comment=Ivory paper window decorations matching the VM Console editorial UI
 Encoding=UTF-8
 
 [X-GNOME-Metatheme]
-GtkTheme=Arc-Dark
-MetacityTheme=Arc-Dark
-IconTheme=Papirus-Dark
-CursorTheme=Bibata-Modern-Ice
+GtkTheme=Arc
+MetacityTheme=Arc
+IconTheme=Papirus
+CursorTheme=Bibata-Modern-Classic
 ButtonLayout=close,minimize,maximize:
 EOF
 
 # --- xfwm4 frame tiles --------------------------------------------------------
-# xfwm4 stretches these PNGs to draw the window frame. We need:
-#   title-{1..5}-{active,inactive}.png       horizontal title strip (1px wide)
-#   top-{left,right}-{active,inactive}.png   top corners (8x8)
-#   left-{active,inactive}.png               left side (1px wide)
-#   right-{active,inactive}.png              right side (1px wide)
-#   bottom-{left,right,side}-{active,inactive}.png   bottom edge
+# xfwm4 stretches these PNGs to draw the window frame.
 
-TITLE_BG_ACTIVE="#1c1c20"
-TITLE_BG_INACTIVE="#161618"
-SIDE_COLOR="#0e0e10"
+TITLE_BG_ACTIVE="#efe8d8"     # ivory (darker than paper #f5f1e8 to read)
+TITLE_BG_INACTIVE="#e6dfd0"   # paler ivory
+SIDE_COLOR="#d8d2c4"          # rule color
 HEIGHT_TITLE=28
 HEIGHT_BOTTOM=1
 WIDTH_SIDE=1
-CORNER=8
+CORNER=3                      # discrete editorial corner
 
 # Title strip (1px wide, stretched horizontally by xfwm4)
 for state in active inactive; do
@@ -85,10 +73,9 @@ for state in active inactive; do
     done
 done
 
-# Top-left and top-right corners (rounded a tiny bit)
+# Top-left and top-right corners (very mildly rounded)
 for state in active inactive; do
     if [ "$state" = active ]; then color="$TITLE_BG_ACTIVE"; else color="$TITLE_BG_INACTIVE"; fi
-    # Top-left corner: filled rectangle with rounded corner cut out
     convert -size ${CORNER}x${HEIGHT_TITLE} xc:none \
         -fill "${color}" \
         -draw "roundrectangle 0,0 $((CORNER * 2)),$((HEIGHT_TITLE - 1)) ${CORNER} ${CORNER}" \
@@ -117,8 +104,9 @@ for state in active inactive; do
         "${THEME_DIR}/xfwm4/bottom-right-${state}.png"
 done
 
-# --- Traffic-light buttons ---------------------------------------------------
-# Three macOS-style dots (close=red, minimize=amber, maximize=green)
+# --- Traffic-light buttons (vermilion-trio) ----------------------------------
+# close = vermilion, hide = ink-soft, maximize = sage neutral.
+# Inactive state shares the same paper-soft tone for all three.
 make_button () {
     local name="$1" color="$2" inactive_color="$3"
     local size=14
@@ -132,15 +120,63 @@ make_button () {
     cp "${THEME_DIR}/xfwm4/${name}-active.png" "${THEME_DIR}/xfwm4/${name}-pressed.png"
 }
 
-make_button "close"    "#ff5f57" "#3a3a40"
-make_button "hide"     "#febc2e" "#3a3a40"
-make_button "maximize" "#28c840" "#3a3a40"
+make_button "close"    "#ff3a17" "#c7c0b2"
+make_button "hide"     "#5a544a" "#c7c0b2"
+make_button "maximize" "#9ba89a" "#c7c0b2"
 
-cat > /usr/share/glib-2.0/schemas/99_cursor-style.gschema.override <<'EOF'
+# --- GLib schema overrides ----------------------------------------------------
+cat > /usr/share/glib-2.0/schemas/99_editorial-swiss.gschema.override <<'EOF'
 [org.gnome.desktop.interface]
-font-name='Inter 10'
-document-font-name='Inter 10'
+font-name='Inter Tight 10'
+document-font-name='Inter Tight 10'
+monospace-font-name='JetBrains Mono 10'
 EOF
 glib-compile-schemas /usr/share/glib-2.0/schemas/ 2>/dev/null || true
 
-echo ">>> CursorStyle theme built"
+# --- Plank dock theme: EditorialSwiss -----------------------------------------
+# Plank stores themes under /usr/share/plank/themes/<Name>/{dock.theme,theme}.
+PLANK_THEME=/usr/share/plank/themes/EditorialSwiss
+mkdir -p "$PLANK_THEME"
+
+cat > "$PLANK_THEME/dock.theme" <<'EOF'
+[PlankTheme]
+TopRoundness=3
+BottomRoundness=3
+LineWidth=1
+OuterStrokeColor=216;;210;;196;;255
+FillStartColor=245;;241;;232;;235
+FillEndColor=245;;241;;232;;235
+InnerStrokeColor=255;;255;;255;;0
+
+[PlankDockTheme]
+HorizPadding=6.0
+TopPadding=2.0
+BottomPadding=2.0
+ItemPadding=4.0
+IndicatorSize=2.0
+IconShadowSize=0.0
+UrgentBounceHeight=1.0
+LaunchBounceHeight=0.5
+FadeOpacity=0.85
+ClickTime=300
+UrgentTime=2000
+UrgentBlinkCount=2
+UrgentColor=255;;58;;23;;255
+SelectedItemColor=255;;58;;23;;255
+GlowSize=12
+ActiveTime=300
+EOF
+
+# Plank older versions look for "theme" too. Keep both for safety.
+cat > "$PLANK_THEME/theme" <<'EOF'
+[PlankTheme]
+TopRoundness=3
+BottomRoundness=3
+LineWidth=1
+OuterStrokeColor=216;;210;;196;;255
+FillStartColor=245;;241;;232;;235
+FillEndColor=245;;241;;232;;235
+InnerStrokeColor=255;;255;;255;;0
+EOF
+
+echo ">>> EditorialSwiss theme built"

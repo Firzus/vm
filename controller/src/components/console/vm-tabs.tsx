@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useTransition } from "react";
 import { Plus, Trash2, RotateCw, Loader2, AlertTriangle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -12,6 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import { VmConsole } from "@/components/console/vm-console";
 import { useVms, createVm, deleteVm, resetVm } from "@/lib/useVms";
+import { openOnboarding } from "@/lib/use-onboarding";
 import type { Vm } from "@/lib/schemas";
 import { cn } from "@/lib/utils";
 
@@ -29,7 +31,6 @@ export function VmTabs() {
     return vms[0]?.id ?? null;
   }, [vms, requestedId]);
 
-  // Keep the URL in sync when the active id is auto-resolved (first VM).
   useEffect(() => {
     if (activeId && requestedId !== activeId) {
       const next = new URLSearchParams(search.toString());
@@ -77,9 +78,11 @@ export function VmTabs() {
   };
 
   if (isLoading && vms.length === 0) {
-    return <CenteredMessage tone="info" icon={<Loader2 className="size-4 animate-spin" />}>
-      Loading VM list…
-    </CenteredMessage>;
+    return (
+      <CenteredMessage tone="info" icon={<Loader2 className="size-4 animate-spin" />}>
+        Loading VM list…
+      </CenteredMessage>
+    );
   }
 
   if (error) {
@@ -91,9 +94,7 @@ export function VmTabs() {
   }
 
   if (vms.length === 0) {
-    return (
-      <EmptyState onCreate={onCreate} pending={pending} />
-    );
+    return <EmptyState onCreate={onCreate} pending={pending} />;
   }
 
   return (
@@ -102,45 +103,55 @@ export function VmTabs() {
       onValueChange={setActive}
       className="h-full w-full"
     >
-      <div className="flex items-center gap-2 border-b border-border bg-background/85 px-3 py-1.5">
-        <TabsList variant="line" className="overflow-x-auto">
-          {vms.map((vm) => (
-            // We render the trigger and the per-VM actions side-by-side
-            // inside a flex row instead of nesting buttons inside the trigger
-            // — nested <button> elements aren't valid HTML and Radix's tab
-            // pointer-down handler would swallow the inner click.
-            <div
-              key={vm.id}
-              className="group relative flex items-center"
-              data-active={activeId === vm.id ? "true" : undefined}
-            >
-              <TabsTrigger
-                value={vm.id}
-                className="flex items-center gap-2 pr-1.5 font-mono text-[12px]"
+      <div className="flex items-center gap-2 border-b border-rule bg-paper/85 px-3 py-2 backdrop-blur-md md:px-4">
+        <span className="hidden font-mono text-[10px] uppercase tracking-[0.18em] text-ink-muted md:inline">
+          Sessions
+        </span>
+        <span aria-hidden className="hidden h-3 w-px bg-rule md:inline-block" />
+
+        <div className="scroll-fade-x flex-1 overflow-x-auto">
+          <TabsList variant="line" className="flex w-max items-center gap-3 pr-2">
+            {vms.map((vm, idx) => (
+              <div
+                key={vm.id}
+                className="group relative flex shrink-0 items-center"
+                data-active={activeId === vm.id ? "true" : undefined}
               >
-                <span
-                  aria-hidden
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    vm.status === "running" && "bg-[var(--success)] shadow-[0_0_6px_var(--success)]",
-                    vm.status === "starting" && "bg-[var(--warning)] shadow-[0_0_6px_var(--warning)]",
-                    vm.status === "stopped" && "bg-muted-foreground",
-                    vm.status === "error" && "bg-destructive",
-                    (vm.status === "creating" || vm.status === "removing") &&
-                      "bg-[var(--vercel-violet)] shadow-[0_0_6px_var(--vercel-violet)]",
-                  )}
+                <TabsTrigger
+                  value={vm.id}
+                  className="flex items-center gap-2 pr-1.5"
+                >
+                  {/* Editorial numeral. */}
+                  <span className="font-mono text-[10px] tracking-[0.14em] text-ink-muted">
+                    {String(idx + 1).padStart(2, "0")}
+                  </span>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      vm.status === "running" && "bg-vermilion",
+                      vm.status === "starting" && "bg-vermilion/70",
+                      vm.status === "stopped" && "bg-rule-strong",
+                      vm.status === "error" && "bg-vermilion",
+                      (vm.status === "creating" || vm.status === "removing") &&
+                        "bg-ink-muted",
+                    )}
+                  />
+                  <span className="font-mono text-[12px] text-ink">
+                    {vm.label || vm.name}
+                  </span>
+                </TabsTrigger>
+                <VmTabActions
+                  vm={vm}
+                  onDelete={onDelete}
+                  onReset={onReset}
+                  pending={pending}
                 />
-                <span>{vm.label || vm.name}</span>
-              </TabsTrigger>
-              <VmTabActions
-                vm={vm}
-                onDelete={onDelete}
-                onReset={onReset}
-                pending={pending}
-              />
-            </div>
-          ))}
-        </TabsList>
+              </div>
+            ))}
+          </TabsList>
+        </div>
+
         <div className="ml-auto flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -149,7 +160,7 @@ export function VmTabs() {
                 variant="ghost"
                 onClick={onCreate}
                 disabled={pending}
-                className="h-7 gap-1.5 text-[12px]"
+                className="h-8 gap-1.5 text-[12px]"
               >
                 <Plus className="size-3.5" />
                 New VM
@@ -166,7 +177,7 @@ export function VmTabs() {
         <TabsContent
           key={vm.id}
           value={vm.id}
-          className="data-[state=inactive]:hidden h-[calc(100%-2.5rem)] m-0"
+          className="data-[state=inactive]:hidden h-[calc(100%-2.75rem)] m-0"
           forceMount
         >
           <VmConsole vm={vm} />
@@ -201,7 +212,7 @@ function VmTabActions({
               );
               if (ok) onReset(vm.id);
             }}
-            className="grid size-5 place-items-center rounded text-muted-foreground hover:text-foreground"
+            className="grid size-6 place-items-center rounded-[2px] text-ink-muted hover:text-ink"
           >
             <RotateCw className="size-3" />
           </button>
@@ -221,7 +232,7 @@ function VmTabActions({
               );
               if (ok) onDelete(vm.id);
             }}
-            className="grid size-5 place-items-center rounded text-muted-foreground hover:text-destructive"
+            className="grid size-6 place-items-center rounded-[2px] text-ink-muted hover:text-vermilion"
           >
             <Trash2 className="size-3" />
           </button>
@@ -240,26 +251,84 @@ function EmptyState({
   pending: boolean;
 }) {
   return (
-    <div className="relative flex h-full w-full flex-col items-center justify-center gap-6 bg-background spotlight">
-      <div className="grid-bg pointer-events-none absolute inset-0 opacity-60" />
-      <div className="relative z-10 flex max-w-md flex-col items-center gap-4 text-center">
-        <div className="grid size-12 place-items-center rounded-xl bg-foreground/95 text-background">
-          <svg viewBox="0 0 24 24" className="size-6" fill="currentColor" aria-hidden>
-            <path d="M12 2 L22 21 L2 21 Z" />
-          </svg>
+    <div className="relative flex h-full w-full items-center justify-center bg-transparent">
+      <div className="relative z-10 grid w-full max-w-6xl grid-cols-1 gap-8 px-6 py-10 md:grid-cols-[1.05fr_1fr] md:gap-12 md:px-10 lg:gap-16">
+        {/* Editorial cover — folio + numeral + serif title. */}
+        <div className="flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="folio">VM Console · Vol. I · Issue 01</span>
+            <span className="folio">Empty session</span>
+          </div>
+
+          <div className="my-8">
+            <span
+              aria-hidden
+              className="numeral-display block text-[clamp(120px,22vw,260px)]"
+            >
+              No.
+              <span className="text-vermilion">01</span>
+            </span>
+          </div>
+
+          <div className="space-y-5">
+            <h1 className="serif-roman text-[clamp(28px,4vw,44px)] leading-[1.05] tracking-tight text-ink">
+              <span className="serif">A clean</span> Ubuntu desktop,
+              <br className="hidden sm:block" />
+              quietly waiting in the wings.
+            </h1>
+            <p className="max-w-md text-[15px] leading-relaxed text-ink-muted">
+              Spin up a fresh container from the{" "}
+              <span className="mono text-ink">cursor-style-vm</span> image to
+              get a fully isolated XFCE desktop with an automation API attached.
+              Many can run side by side, each in its own tab.
+            </p>
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <Button
+                onClick={onCreate}
+                disabled={pending}
+                size="lg"
+                variant="primary"
+                className="gap-2"
+              >
+                {pending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Plus className="size-4" />
+                )}
+                Create your first VM
+              </Button>
+              <Button
+                variant="link"
+                size="lg"
+                className="px-0"
+                onClick={() => openOnboarding()}
+              >
+                Read the editorial tour
+              </Button>
+            </div>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">No VM running</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Spin up a fresh container from the <code className="font-mono">cursor-style-vm</code> image
-            to get an Ubuntu desktop with an automation API attached.
-            You can run several VMs side by side, each in its own tab.
+
+        {/* Editorial hero artwork. */}
+        <div className="relative hidden md:block">
+          <div className="absolute inset-y-0 -left-6 w-px bg-rule" aria-hidden />
+          <div className="paper-card relative aspect-[14/9] w-full overflow-hidden">
+            <Image
+              src="/empty-state-hero.png"
+              alt=""
+              fill
+              priority
+              sizes="(max-width: 768px) 100vw, 600px"
+              className="object-cover"
+            />
+            <div className="folio absolute bottom-3 left-3">Plate I</div>
+          </div>
+          <p className="mt-3 max-w-sm text-[12px] leading-relaxed text-ink-muted">
+            <span className="serif">A triangle waits to be inhabited.</span>{" "}
+            Each VM is a fresh sheet of paper — drive it from your browser, or
+            from any agent that speaks HTTP.
           </p>
         </div>
-        <Button onClick={onCreate} disabled={pending} size="lg" className="gap-2">
-          {pending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-          Create your first VM
-        </Button>
       </div>
     </div>
   );
@@ -278,8 +347,8 @@ function CenteredMessage({
     <div
       className={cn(
         "flex h-full w-full items-center justify-center gap-2 px-6 text-center text-[13px]",
-        tone === "info" && "text-muted-foreground",
-        tone === "error" && "text-destructive",
+        tone === "info" && "text-ink-muted",
+        tone === "error" && "text-vermilion",
       )}
     >
       {icon}

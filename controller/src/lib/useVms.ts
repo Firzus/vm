@@ -4,11 +4,16 @@
  * SWR-driven VM list, refreshed automatically when the controller's SSE
  * stream reports a Docker event. The Docker daemon stays the source of
  * truth — the SSE channel just tells us when to invalidate the cache.
+ *
+ * Implementation note: a single EventSource per browser tab is enough.
+ * An earlier version of this file opened two — one inside
+ * `useSWRSubscription` and a second inside a follow-up `useEffect` —
+ * which kept long-lived /api/events HTTP connections alive until the
+ * dev server's worker pool was exhausted.
  */
 import useSWR, { type KeyedMutator } from "swr";
-import useSWRSubscription from "swr/subscription";
 import { useEffect } from "react";
-import type { CreateVmInput, Vm, VmEvent } from "./schemas";
+import type { CreateVmInput, Vm } from "./schemas";
 
 const fetcher = async (url: string): Promise<{ vms: Vm[] }> => {
   const res = await fetch(url);
@@ -23,26 +28,8 @@ export function useVms() {
     { refreshInterval: 0, revalidateOnFocus: false },
   );
 
-  // Subscribe to the SSE stream and invalidate on every event.
-  useSWRSubscription("/api/events", (key, { next }) => {
-    const es = new EventSource(key);
-    es.addEventListener("vm", (evt) => {
-      try {
-        const parsed = JSON.parse((evt as MessageEvent).data) as VmEvent;
-        next(null, parsed);
-      } catch {
-        /* ignore */
-      }
-    });
-    es.addEventListener("error", () => {
-      next(new Error("event_stream_error"));
-    });
-    return () => es.close();
-  });
-
-  // The subscription's `data` is unused — we only care about the side
-  // effect of mutating SWR's cache. We do that here so every event fires
-  // a single revalidation regardless of how many components subscribe.
+  // Single SSE subscription that triggers an SWR revalidation on every
+  // server-side Docker event. Closes on unmount, re-opens on remount.
   useEffect(() => {
     let es: EventSource | null = null;
     try {
@@ -51,7 +38,7 @@ export function useVms() {
         mutate();
       });
     } catch {
-      /* ignore */
+      /* ignore — best-effort, the SWR cache will simply not auto-refresh */
     }
     return () => {
       es?.close();

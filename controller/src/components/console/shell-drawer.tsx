@@ -15,14 +15,18 @@ type Props = {
   vmId: string;
 };
 
+/**
+ * "Ink on paper" shell drawer. Drops up from the bottom of the stage,
+ * full width on tablet portrait and below, narrower above. Uses
+ * vermilion for the prompt and error tone, ink for the rest.
+ */
 export function ShellDrawer({ open, onClose, vmId }: Props) {
   const client = useMemo(() => createVmClient(vmId), [vmId]);
   const [lines, setLines] = useState<Line[]>(() => [
     {
       id: nextId(),
       kind: "sys",
-      text:
-        `Connected to /api/vm/${vmId}/shell — commands run in the VM container as root.`,
+      text: `Connected to /api/vm/${vmId}/shell — commands run in the VM container as root.`,
     },
   ]);
   const [cmd, setCmd] = useState("");
@@ -101,7 +105,8 @@ export function ShellDrawer({ open, onClose, vmId }: Props) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "ArrowUp" && history.length) {
       e.preventDefault();
-      const next = historyIdx === null ? 0 : Math.min(historyIdx + 1, history.length - 1);
+      const next =
+        historyIdx === null ? 0 : Math.min(historyIdx + 1, history.length - 1);
       setHistoryIdx(next);
       setCmd(history[next]);
     } else if (e.key === "ArrowDown" && historyIdx !== null) {
@@ -122,34 +127,29 @@ export function ShellDrawer({ open, onClose, vmId }: Props) {
   return (
     <div
       ref={root}
-      className="absolute inset-x-0 bottom-0 z-30 mx-auto h-[42%] max-h-[440px] overflow-hidden rounded-t-md border border-border bg-card/95 shadow-[0_-12px_40px_rgba(0,0,0,0.55)] backdrop-blur-md"
+      className="absolute inset-x-0 bottom-0 z-30 mx-auto h-[60%] max-h-[480px] overflow-hidden border-t border-rule bg-paper shadow-[0_-12px_30px_rgba(10,10,10,0.18)] sm:h-[42%]"
     >
-      <header className="flex h-9 items-center justify-between border-b border-border bg-background/40 px-3">
-        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-          <span
-            aria-hidden
-            className="size-1.5 rounded-full"
-            style={{
-              background: "var(--vercel-violet)",
-              boxShadow: "0 0 8px var(--vercel-violet)",
-            }}
-          />
-          <span className="font-medium text-foreground">Host shell</span>
-          <span className="text-foreground/30">·</span>
-          <span className="font-mono text-[11px]">{`/api/vm/${vmId}/shell`}</span>
+      <header className="flex h-9 items-center justify-between border-b border-rule bg-paper-2/60 px-3">
+        <div className="flex items-center gap-2 text-[12px] text-ink-muted">
+          <span aria-hidden className="seal seal-pulse text-vermilion" />
+          <span className="font-medium text-ink">Host shell</span>
+          <span className="text-ink-muted/40">·</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.14em]">
+            {`/api/vm/${vmId}/shell`}
+          </span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={onClose}
             aria-label="Collapse shell"
-            className="grid size-6 place-items-center rounded text-muted-foreground transition hover:text-foreground"
+            className="grid size-7 place-items-center rounded-[2px] text-ink-muted transition hover:text-ink"
           >
             <ChevronDown className="size-3.5" />
           </button>
           <button
             onClick={onClose}
             aria-label="Close shell"
-            className="grid size-6 place-items-center rounded text-muted-foreground transition hover:text-destructive"
+            className="grid size-7 place-items-center rounded-[2px] text-ink-muted transition hover:text-vermilion"
           >
             <X className="size-3.5" />
           </button>
@@ -158,7 +158,7 @@ export function ShellDrawer({ open, onClose, vmId }: Props) {
 
       <div className="flex h-[calc(100%-2.25rem)] flex-col">
         <div
-          className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[12.5px] leading-relaxed scrollbar-thin"
+          className="flex-1 overflow-y-auto px-3 py-2 font-mono text-[12.5px] leading-relaxed"
           onClick={() => inputRef.current?.focus()}
         >
           {lines.map((l) => (
@@ -166,16 +166,15 @@ export function ShellDrawer({ open, onClose, vmId }: Props) {
               key={l.id}
               className={cn(
                 "whitespace-pre-wrap",
-                l.kind === "in" && "text-foreground",
-                l.kind === "out" && "text-foreground/85",
-                l.kind === "err" && "text-destructive",
-                l.kind === "sys" && "text-muted-foreground italic",
+                l.kind === "in" && "text-ink",
+                l.kind === "out" && "text-ink/85",
+                l.kind === "err" && "text-vermilion",
+                l.kind === "sys" && "text-ink-muted italic",
               )}
             >
               {l.kind === "in" ? (
                 <>
-                  <span style={{ color: "var(--vercel-violet)" }}>$</span>{" "}
-                  {l.text}
+                  <span className="text-vermilion">$</span> {l.text}
                 </>
               ) : (
                 l.text
@@ -187,9 +186,9 @@ export function ShellDrawer({ open, onClose, vmId }: Props) {
 
         <form
           onSubmit={submit}
-          className="flex items-center gap-2 border-t border-border bg-background/30 px-3 py-2 font-mono text-sm"
+          className="flex items-center gap-2 border-t border-rule bg-paper-2/40 px-3 py-2 font-mono text-sm safe-bottom"
         >
-          <span style={{ color: "var(--vercel-violet)" }}>$</span>
+          <span className="text-vermilion">$</span>
           <input
             ref={inputRef}
             value={cmd}
@@ -197,11 +196,11 @@ export function ShellDrawer({ open, onClose, vmId }: Props) {
             onKeyDown={onKeyDown}
             disabled={busy}
             placeholder={busy ? "running…" : "ls -la /root"}
-            className="flex-1 bg-transparent text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+            className="flex-1 bg-transparent text-ink placeholder:text-ink-muted/60 focus:outline-none"
             spellCheck={false}
             autoComplete="off"
           />
-          <kbd className="rounded border border-border px-1 text-[10px] text-muted-foreground">
+          <kbd className="rounded-[2px] border border-rule px-1 text-[10px] text-ink-muted">
             esc
           </kbd>
         </form>

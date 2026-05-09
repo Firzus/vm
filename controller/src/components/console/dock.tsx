@@ -37,6 +37,11 @@ type Props = {
   disabled?: boolean;
 };
 
+/**
+ * Editorial dock: a paper card with hairline rule, ink icons, and a
+ * vermilion underline that traces under the active item. Sits at the
+ * bottom of the viewer; collapses to icon-only on small screens.
+ */
 export function Dock({
   onScreenshot,
   onReconnect,
@@ -52,7 +57,10 @@ export function Dock({
       role="toolbar"
       aria-label="VM controls"
       className={cn(
-        "pointer-events-auto inline-flex items-center gap-0.5 rounded-lg border border-border/70 bg-card/80 p-0.5 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.7)] backdrop-blur-md",
+        "pointer-events-auto inline-flex items-center gap-1 px-2 py-1.5",
+        "rounded-[3px] border border-rule bg-paper/95 text-ink",
+        "shadow-[0_18px_30px_-22px_rgba(10,10,10,0.32)] backdrop-blur",
+        "safe-bottom",
         disabled && "opacity-70",
       )}
     >
@@ -77,13 +85,13 @@ export function Dock({
         <RotateCw className="size-3.5" />
       </DockButton>
 
-      <span className="mx-0.5 h-5 w-px bg-border" />
+      <span className="mx-0.5 h-4 w-px bg-rule" aria-hidden />
 
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <button
             aria-label="Restart desktop session"
-            className="group inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px] text-foreground/75 transition hover:bg-destructive/10 hover:text-destructive"
+            className="group inline-flex h-8 items-center gap-1.5 rounded-[2px] px-2 text-[12px] text-ink/75 transition hover:text-vermilion"
           >
             <Power className="size-3.5" />
             <span className="hidden text-[12px] sm:inline">Restart</span>
@@ -100,8 +108,8 @@ export function Dock({
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
+              variant="destructive"
               onClick={() => void onRestart()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Restart
             </AlertDialogAction>
@@ -109,7 +117,7 @@ export function Dock({
         </AlertDialogContent>
       </AlertDialog>
 
-      <span className="mx-0.5 h-5 w-px bg-border" />
+      <span className="mx-0.5 h-4 w-px bg-rule" aria-hidden />
 
       <DockButton
         label={fullscreen ? "Exit fullscreen  ·  Esc" : "Fullscreen"}
@@ -149,15 +157,17 @@ function DockButton({
           aria-label={label}
           aria-pressed={active}
           className={cn(
-            "inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-foreground/75 transition",
-            "hover:bg-accent hover:text-foreground",
-            active &&
-              "bg-foreground/[0.08] text-foreground hover:bg-foreground/[0.12]",
+            "relative inline-flex h-8 items-center gap-1.5 rounded-[2px] px-2 text-ink/75 transition",
+            "hover:text-ink",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+            // The "active" state — vermilion underline under the icon.
+            "after:absolute after:inset-x-2 after:-bottom-0.5 after:h-[1.5px] after:bg-vermilion after:scale-x-0 after:origin-left after:transition-transform after:duration-300",
+            active && "text-ink after:scale-x-100",
           )}
         >
           {children}
           {kbd && (
-            <kbd className="ml-0.5 hidden rounded border border-border bg-background/50 px-1 font-mono text-[10px] text-muted-foreground sm:inline">
+            <kbd className="ml-0.5 hidden rounded-[2px] border border-rule bg-paper-2 px-1 font-mono text-[10px] text-ink-muted sm:inline">
               {kbd}
             </kbd>
           )}

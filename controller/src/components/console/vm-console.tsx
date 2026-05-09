@@ -45,8 +45,6 @@ export function VmConsole({ vm }: Props) {
   // when the VM connects fast. Reset on reconnect.
   useEffect(() => {
     let cancelled = false;
-    // Synchronous reset of the boot timer would trigger a cascading render —
-    // schedule the flip on the microtask queue instead.
     queueMicrotask(() => {
       if (!cancelled) setBootMinElapsed(false);
     });
@@ -74,11 +72,11 @@ export function VmConsole({ vm }: Props) {
       if (cancelled || !root.current) return;
       ctx = gsap.context(() => {
         const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
-        tl.from("[data-anim='header']", { y: -8, opacity: 0, duration: 0.4 });
+        tl.from("[data-anim='header']", { y: -8, opacity: 0, duration: 0.45 });
         tl.from(
           "[data-anim='stage']",
-          { y: 18, scale: 0.985, opacity: 0, duration: 0.6 },
-          "-=0.2",
+          { y: 18, opacity: 0, duration: 0.6 },
+          "-=0.25",
         );
         tl.from(
           "[data-anim='dock']",
@@ -164,43 +162,53 @@ export function VmConsole({ vm }: Props) {
     status === "error"
       ? statusMsg ?? "Connection error"
       : status === "disconnected" && bootMinElapsed
-      ? statusMsg ?? "Disconnected"
-      : null;
+        ? statusMsg ?? "Disconnected"
+        : null;
 
   return (
     <main
       ref={root}
-      className="relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground spotlight"
+      className="relative flex h-full w-full flex-col overflow-hidden bg-transparent text-ink"
     >
-      {/* Hairline grid wash — Vercel signature ambient layer */}
-      <div className="grid-bg pointer-events-none absolute inset-0 opacity-100" />
-
       {/* Top bar lives in the page chrome, not over the desktop. */}
       <div data-anim="header" className="relative z-30">
         <ConsoleHeader vm={vm} status={status} size={size} />
       </div>
 
       <div
-        className="relative z-10 flex min-h-0 flex-1 items-center justify-center overflow-hidden px-4 sm:px-6 lg:px-8 py-4"
+        className="relative z-10 flex min-h-0 flex-1 items-center justify-center overflow-hidden px-3 py-3 sm:px-6 sm:py-4 lg:px-10 lg:py-6"
         style={{ containerType: "size" }}
       >
+        {/* Folio in the gutter — only visible on lg+ where there's room. */}
+        <div
+          aria-hidden
+          className="absolute left-3 top-1/2 hidden -translate-y-1/2 origin-left -rotate-90 lg:block"
+        >
+          <span className="folio whitespace-nowrap">
+            VM · Live framebuffer · 16/9
+          </span>
+        </div>
+        <div
+          aria-hidden
+          className="absolute right-3 top-1/2 hidden -translate-y-1/2 origin-right rotate-90 lg:block"
+        >
+          <span className="folio whitespace-nowrap">
+            {vm.label || vm.name}
+          </span>
+        </div>
+
         <div
           data-anim="stage"
           data-active={showBoot ? "true" : undefined}
           className={cn(
-            "relative overflow-hidden bg-card",
-            "border-shimmer",
+            "relative overflow-hidden bg-paper",
+            "border border-rule shadow-[0_30px_60px_-22px_rgba(10,10,10,0.22)]",
           )}
           style={{
             width: "min(100%, calc(100cqh * 16 / 9))",
             height: "min(100%, calc(100cqw * 9 / 16))",
           }}
         >
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 border border-border"
-          />
-
           <VncViewer
             key={reconnectKey}
             wsPath={wsPath}
@@ -224,7 +232,7 @@ export function VmConsole({ vm }: Props) {
         <div
           data-anim="dock"
           className="pointer-events-none absolute inset-x-0 z-40 flex justify-center transition-all duration-300"
-          style={{ bottom: shellOpen ? "calc(42% + 12px)" : "16px" }}
+          style={{ bottom: shellOpen ? "calc(60% + 12px)" : "16px" }}
         >
           <Dock
             onScreenshot={onScreenshot}
@@ -239,7 +247,7 @@ export function VmConsole({ vm }: Props) {
         </div>
 
         {toast && (
-          <div className="pointer-events-none absolute bottom-16 left-1/2 z-50 -translate-x-1/2 rounded-md border border-border bg-card/95 px-3 py-1.5 text-[12px] font-medium text-foreground shadow-lg backdrop-blur">
+          <div className="pointer-events-none absolute bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-[2px] border border-rule bg-paper/95 px-3 py-1.5 text-[12px] font-medium text-ink shadow-[0_18px_30px_-22px_rgba(10,10,10,0.32)] backdrop-blur">
             {toast}
           </div>
         )}

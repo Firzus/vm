@@ -34,7 +34,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         novnc websockify \
         xdotool wmctrl scrot imagemagick xclip xdg-utils socat \
         xfonts-base xfonts-100dpi xfonts-75dpi \
-        fonts-noto fonts-noto-color-emoji fonts-liberation fonts-inter \
+        fonts-noto fonts-noto-color-emoji fonts-liberation fonts-inter fonts-jetbrains-mono \
         arc-theme papirus-icon-theme \
     && rm -rf /var/lib/apt/lists/*
 
@@ -76,6 +76,10 @@ RUN mkdir -p /root/.config/google-chrome \
     && touch /root/.config/google-chrome/First\ Run \
     && printf '%s\n' '{ "browser": { "has_seen_welcome_page": true } }' \
         > /root/.config/google-chrome/Local\ State
+
+# Pre-baked editorial-Swiss wallpaper (generated via the imagegen skill).
+RUN mkdir -p /usr/share/backgrounds/cursor-style
+COPY theme/wallpaper/cursor-paper.png /usr/share/backgrounds/cursor-style/cursor-paper.png
 
 COPY theme/build-theme.sh /tmp/build-theme.sh
 RUN bash /tmp/build-theme.sh && rm /tmp/build-theme.sh

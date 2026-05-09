@@ -21,7 +21,7 @@ HideDelay=0
 Monitor=
 
 #The name of the dock's theme to use.
-Theme=Transparent
+Theme=EditorialSwiss
 
 #The alignment for the dock on the monitor's edge.  Possible values are: 'panel-mode-center', 'panel-mode-fill', 'panel-mode-start' or 'panel-mode-end'.
 Alignment=panel-mode-center

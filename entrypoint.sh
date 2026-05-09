@@ -55,11 +55,11 @@ done
 # XFCE/Bibata takes over the cursor theme a moment later.
 xsetroot -cursor_name left_ptr 2>/dev/null || true
 
-# Make Bibata Ice the per-user default cursor theme (read by Gtk/Qt at startup).
+# Make Bibata Classic the per-user default cursor theme (read by Gtk/Qt at startup).
 mkdir -p /root/.icons/default
 cat > /root/.icons/default/index.theme <<'ICON'
 [Icon Theme]
-Inherits=Bibata-Modern-Ice
+Inherits=Bibata-Modern-Classic
 ICON
 
 echo ">>> starting XFCE session"
