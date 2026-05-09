@@ -1,32 +1,35 @@
-"""Host MCP server for the Cursor-style VM.
+"""Host MCP server for the Cursor-style VM controller.
 
-Proxies the in-container automation API (``VM_API_URL``) and runs host-side
-``docker compose`` for lifecycle (up/down/reset).
+Talks to the controller (Next.js, default ``http://localhost:3000``) instead
+of a single VM API. Every desktop tool takes an explicit ``vm_id`` and is
+proxied through the controller's per-VM HTTP route ``/api/vm/{id}/...``.
+
+Lifecycle tools (``create_vm``, ``delete_vm``, ``reset_vm``, ``restart_vm``,
+``list_vms``) call the controller's ``/api/vms`` endpoints directly.
 """
 
 from __future__ import annotations
 
 import os
 import shlex
-import subprocess
-from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.fastmcp import FastMCP, Image
 from pydantic import Field
 
-VM_API_URL = os.environ.get("VM_API_URL", "http://localhost:8000")
-COMPOSE_DIR = Path(
-    os.environ.get("VM_COMPOSE_DIR", str(Path(__file__).resolve().parent.parent))
-)
-COMPOSE_SERVICE = os.environ.get("VM_COMPOSE_SERVICE", "vm")
+CONTROLLER_URL = os.environ.get("CONTROLLER_URL", "http://localhost:3000")
 
 mcp = FastMCP("cursor-vm")
-client = httpx.Client(base_url=VM_API_URL, timeout=120.0)
+client = httpx.Client(base_url=CONTROLLER_URL, timeout=120.0)
 
 
-def _api(method: str, path: str, **kwargs) -> dict:
+# ---------------------------------------------------------------------------
+# HTTP plumbing
+# ---------------------------------------------------------------------------
+
+
+def _request(method: str, path: str, **kwargs: Any) -> dict:
     resp = client.request(method, path, **kwargs)
     resp.raise_for_status()
     if resp.headers.get("content-type", "").startswith("application/json"):
@@ -34,50 +37,120 @@ def _api(method: str, path: str, **kwargs) -> dict:
     return {"status_code": resp.status_code, "text": resp.text}
 
 
-def _compose(*args: str, timeout: float = 600.0) -> dict:
-    proc = subprocess.run(
-        ["docker", "compose", *args],
-        cwd=str(COMPOSE_DIR),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
+def _vm_api(method: str, vm_id: str, path: str, **kwargs: Any) -> dict:
+    """Call the per-VM proxy: /api/vm/{vm_id}/{path}."""
+    return _request(method, f"/api/vm/{vm_id}/{path}", **kwargs)
+
+
+def _resolve_vm_id(vm_id: str | None) -> str:
+    """Resolve an optional vm_id. Returns the only VM if exactly one exists."""
+    if vm_id:
+        return vm_id
+    listing = _request("GET", "/api/vms")
+    vms = listing.get("vms", [])
+    if len(vms) == 1:
+        return vms[0]["id"]
+    if not vms:
+        raise RuntimeError(
+            "No VM exists. Call create_vm() first, or specify vm_id explicitly."
+        )
+    names = ", ".join(f"{v['id']} ({v.get('label') or v['name']})" for v in vms)
+    raise RuntimeError(
+        f"Multiple VMs running ({len(vms)}). Specify vm_id. Choices: {names}"
     )
-    return {
-        "cmd": ["docker", "compose", *args],
-        "returncode": proc.returncode,
-        "stdout": proc.stdout,
-        "stderr": proc.stderr,
-    }
+
+
+# ---------------------------------------------------------------------------
+# VM lifecycle (controller-level)
+# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
-def health() -> dict:
+def list_vms() -> dict:
+    """List every VM the controller knows about (id, name, status, ports)."""
+    return _request("GET", "/api/vms")
+
+
+@mcp.tool()
+def create_vm(
+    label: str | None = None,
+    memory_mb: Annotated[int | None, Field(ge=512, le=65536)] = None,
+    cpus: Annotated[float | None, Field(gt=0, le=16)] = None,
+) -> dict:
+    """Spin up a new VM container from the cursor-style-vm image.
+
+    Returns ``{ vm: { id, name, ports: {api, novnc, cdp}, ... } }``.
+    """
+    body: dict[str, Any] = {}
+    if label:
+        body["label"] = label
+    if memory_mb is not None:
+        body["memoryMb"] = memory_mb
+    if cpus is not None:
+        body["cpus"] = cpus
+    return _request("POST", "/api/vms", json=body)
+
+
+@mcp.tool()
+def delete_vm(
+    vm_id: str,
+    wipe: bool = True,
+) -> dict:
+    """Stop the container and (by default) delete its persistent /root volume.
+
+    Set ``wipe=false`` to keep the volume around for a future ``create_vm``.
+    """
+    suffix = "?wipe=1" if wipe else ""
+    return _request("DELETE", f"/api/vms/{vm_id}{suffix}")
+
+
+@mcp.tool()
+def reset_vm(vm_id: str, wipe: bool = True) -> dict:
+    """Hard-reset a VM: destroy + recreate the container (and volume if wipe)."""
+    suffix = "?wipe=1" if wipe else ""
+    return _request("POST", f"/api/vms/{vm_id}/reset{suffix}")
+
+
+@mcp.tool()
+def restart_vm(vm_id: str) -> dict:
+    """Soft restart: keeps the /root volume and re-creates the desktop session."""
+    return _request("POST", f"/api/vms/{vm_id}/restart")
+
+
+# ---------------------------------------------------------------------------
+# Desktop / system (per-VM)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def health(vm_id: str | None = None) -> dict:
     """Check the in-VM automation API is reachable."""
-    return _api("GET", "/health")
+    return _vm_api("GET", _resolve_vm_id(vm_id), "health")
 
 
 @mcp.tool()
-def screen_size() -> dict:
+def screen_size(vm_id: str | None = None) -> dict:
     """Return the VM virtual screen dimensions (width, height)."""
-    return _api("GET", "/screen_size")
+    return _vm_api("GET", _resolve_vm_id(vm_id), "screen_size")
 
 
 @mcp.tool()
-def cursor_position() -> dict:
+def cursor_position(vm_id: str | None = None) -> dict:
     """Return the current mouse cursor position."""
-    return _api("GET", "/cursor_position")
+    return _vm_api("GET", _resolve_vm_id(vm_id), "cursor_position")
 
 
 @mcp.tool()
-def list_windows() -> dict:
+def list_windows(vm_id: str | None = None) -> dict:
     """List currently open desktop windows (id, desktop, host, title)."""
-    return _api("GET", "/windows")
+    return _vm_api("GET", _resolve_vm_id(vm_id), "windows")
 
 
 @mcp.tool()
-def screenshot() -> Image:
+def screenshot(vm_id: str | None = None) -> Image:
     """Capture a PNG screenshot of the VM desktop."""
-    resp = client.get("/screenshot")
+    resolved = _resolve_vm_id(vm_id)
+    resp = client.get(f"/api/vm/{resolved}/screenshot")
     resp.raise_for_status()
     return Image(data=resp.content, format="png")
 
@@ -86,9 +159,12 @@ def screenshot() -> Image:
 def move_mouse(
     x: Annotated[int, Field(ge=0)],
     y: Annotated[int, Field(ge=0)],
+    vm_id: str | None = None,
 ) -> dict:
     """Move the mouse cursor to (x, y)."""
-    return _api("POST", "/move", json={"x": x, "y": y})
+    return _vm_api(
+        "POST", _resolve_vm_id(vm_id), "move", json={"x": x, "y": y}
+    )
 
 
 @mcp.tool()
@@ -97,25 +173,31 @@ def click(
     y: Annotated[int, Field(ge=0)],
     button: Literal["left", "middle", "right"] = "left",
     clicks: Annotated[int, Field(ge=1, le=5)] = 1,
+    vm_id: str | None = None,
 ) -> dict:
     """Click at (x, y). Supports left/middle/right and up to 5 clicks."""
-    return _api(
+    return _vm_api(
         "POST",
-        "/click",
+        _resolve_vm_id(vm_id),
+        "click",
         json={"x": x, "y": y, "button": button, "clicks": clicks},
     )
 
 
 @mcp.tool()
-def double_click(x: int, y: int) -> dict:
+def double_click(x: int, y: int, vm_id: str | None = None) -> dict:
     """Double left-click at (x, y)."""
-    return _api("POST", "/double_click", json={"x": x, "y": y})
+    return _vm_api(
+        "POST", _resolve_vm_id(vm_id), "double_click", json={"x": x, "y": y}
+    )
 
 
 @mcp.tool()
-def right_click(x: int, y: int) -> dict:
+def right_click(x: int, y: int, vm_id: str | None = None) -> dict:
     """Right-click at (x, y)."""
-    return _api("POST", "/right_click", json={"x": x, "y": y})
+    return _vm_api(
+        "POST", _resolve_vm_id(vm_id), "right_click", json={"x": x, "y": y}
+    )
 
 
 @mcp.tool()
@@ -124,11 +206,13 @@ def scroll(
     y: int,
     direction: Literal["up", "down", "left", "right"] = "down",
     amount: Annotated[int, Field(ge=1, le=50)] = 3,
+    vm_id: str | None = None,
 ) -> dict:
     """Scroll the wheel at (x, y) in the given direction."""
-    return _api(
+    return _vm_api(
         "POST",
-        "/scroll",
+        _resolve_vm_id(vm_id),
+        "scroll",
         json={"x": x, "y": y, "direction": direction, "amount": amount},
     )
 
@@ -140,11 +224,13 @@ def drag(
     to_x: int,
     to_y: int,
     button: Literal["left", "middle", "right"] = "left",
+    vm_id: str | None = None,
 ) -> dict:
     """Drag from (from_x, from_y) to (to_x, to_y) with the given button held."""
-    return _api(
+    return _vm_api(
         "POST",
-        "/drag",
+        _resolve_vm_id(vm_id),
+        "drag",
         json={
             "from": {"x": from_x, "y": from_y},
             "to": {"x": to_x, "y": to_y},
@@ -157,91 +243,118 @@ def drag(
 def type_text(
     text: str,
     delay_ms: Annotated[int, Field(ge=0, le=500)] = 12,
+    vm_id: str | None = None,
 ) -> dict:
     """Type literal text at the current keyboard focus."""
-    return _api("POST", "/type", json={"text": text, "delay_ms": delay_ms})
+    return _vm_api(
+        "POST",
+        _resolve_vm_id(vm_id),
+        "type",
+        json={"text": text, "delay_ms": delay_ms},
+    )
 
 
 @mcp.tool()
 def press_key(
     keys: str,
     repeat: Annotated[int, Field(ge=1, le=20)] = 1,
+    vm_id: str | None = None,
 ) -> dict:
     """Send an xdotool key combo, e.g. 'Return', 'ctrl+t', 'alt+F4', 'super'."""
-    return _api("POST", "/key", json={"keys": keys, "repeat": repeat})
+    return _vm_api(
+        "POST",
+        _resolve_vm_id(vm_id),
+        "key",
+        json={"keys": keys, "repeat": repeat},
+    )
 
 
 @mcp.tool()
 def shell(
     cmd: str,
     timeout: Annotated[float, Field(ge=0.1, le=600.0)] = 60.0,
+    vm_id: str | None = None,
 ) -> dict:
     """Run an arbitrary shell command inside the VM container.
 
-    Returns ``{cmd, returncode, stdout, stderr}``. Use this for filesystem
-    inspection, scripting, or anything not covered by the dedicated tools.
+    Returns ``{cmd, returncode, stdout, stderr}``.
     """
-    return _api("POST", "/shell", json={"cmd": cmd, "timeout": timeout})
+    return _vm_api(
+        "POST",
+        _resolve_vm_id(vm_id),
+        "shell",
+        json={"cmd": cmd, "timeout": timeout},
+    )
 
 
 @mcp.tool()
-def launch_app(name: str) -> dict:
+def launch_app(name: str, vm_id: str | None = None) -> dict:
     """Launch a desktop application detached from the API request.
 
     ``name`` is parsed as a shell command line, e.g. ``xfce4-terminal`` or
     ``google-chrome --no-sandbox https://example.com``.
     """
-    resp = client.post("/launch", params={"name": name})
+    resolved = _resolve_vm_id(vm_id)
+    resp = client.post(f"/api/vm/{resolved}/launch", params={"name": name})
     resp.raise_for_status()
     return resp.json()
 
 
 @mcp.tool()
-def open_url(url: str) -> dict:
+def open_url(url: str, vm_id: str | None = None) -> dict:
     """Open a URL in Google Chrome (creates a new window/tab)."""
     cmd = f"google-chrome --no-sandbox {shlex.quote(url)}"
-    resp = client.post("/launch", params={"name": cmd})
+    resolved = _resolve_vm_id(vm_id)
+    resp = client.post(f"/api/vm/{resolved}/launch", params={"name": cmd})
     resp.raise_for_status()
     return resp.json()
+
+
+# ---------------------------------------------------------------------------
+# Chrome DevTools
+# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
 def launch_chrome_debug(
     url: str | None = None,
-    port: Annotated[int, Field(ge=1024, le=65535)] = 9222,
+    vm_id: str | None = None,
 ) -> dict:
     """Launch Chrome inside the VM with the DevTools Protocol exposed.
 
-    Required before pointing chrome-devtools-mcp (or any CDP client) at the
-    VM. Modern Chrome ignores ``--remote-debugging-address=0.0.0.0`` and
-    only listens on loopback, so this tool also starts a ``socat`` forwarder
-    that bridges ``0.0.0.0:<port>`` to Chrome's loopback listener.
+    Returns the host port of the per-VM CDP endpoint so callers can point
+    ``chrome-devtools-mcp`` at ``http://127.0.0.1:{cdp_port}``.
 
-    Kills any existing Chrome instance first. The forwarded port must be
-    published in ``docker-compose.yml`` for the host to reach it.
+    Each VM publishes its own CDP port on the host (allocated by the
+    controller from the VM_PORT_CDP_BASE pool). Inside the VM the chrome
+    DevTools server listens on a fixed loopback port and a ``socat`` bridge
+    republishes it on the container port that the controller maps.
     """
-    chrome_internal_port = port + 1
-    # [g]oogle / [s]ocat patterns so pgrep does not match this shell
+    resolved = _resolve_vm_id(vm_id)
+    # Match the container port published as 9222 in the controller's
+    # PortBindings; the in-container bridge target is +1 on the loopback.
+    container_port = 9222
+    chrome_internal_port = container_port + 1
     setup = (
         "command -v socat >/dev/null || (apt-get update -q && apt-get install -y -q socat) >/dev/null 2>&1; "
         "for p in $(pgrep -f \"/opt/[g]oogle/chrome/chrome\"); do kill -9 $p 2>/dev/null || true; done; "
         "for p in $(pgrep -f \"/usr/bin/[g]oogle-chrome\"); do kill -9 $p 2>/dev/null || true; done; "
-        f"for p in $(pgrep -f \"[s]ocat TCP-LISTEN:{port}\"); do kill -9 $p 2>/dev/null || true; done; "
+        f"for p in $(pgrep -f \"[s]ocat TCP-LISTEN:{container_port}\"); do kill -9 $p 2>/dev/null || true; done; "
         "sleep 2; "
     )
     chrome_flags = (
-        f"--no-sandbox "
+        "--no-sandbox "
         f"--remote-debugging-port={chrome_internal_port} "
-        f"--user-data-dir=/root/.config/google-chrome-debug "
-        f"--no-first-run --no-default-browser-check "
-        f"--disable-features=PrivacySandboxSettings4"
+        "--user-data-dir=/root/.config/google-chrome-debug "
+        "--no-first-run --no-default-browser-check "
+        "--disable-features=PrivacySandboxSettings4"
     )
     target = shlex.quote(url) if url else "about:blank"
     chrome_cmd = f"google-chrome {chrome_flags} {target}"
     socat_cmd = (
-        f"setsid socat TCP-LISTEN:{port},fork,reuseaddr,bind=0.0.0.0 "
+        f"setsid socat TCP-LISTEN:{container_port},fork,reuseaddr,bind=0.0.0.0 "
         f"TCP:127.0.0.1:{chrome_internal_port} "
-        f">/tmp/socat-{port}.log 2>&1 < /dev/null & disown"
+        f">/tmp/socat-{container_port}.log 2>&1 < /dev/null & disown"
     )
     full = (
         setup
@@ -251,16 +364,34 @@ def launch_chrome_debug(
         + "sleep 1; "
         + f"curl -fsS http://127.0.0.1:{chrome_internal_port}/json/version | head -3"
     )
-    result = _api("POST", "/shell", json={"cmd": full, "timeout": 120})
+    result = _vm_api(
+        "POST",
+        resolved,
+        "shell",
+        json={"cmd": full, "timeout": 120},
+    )
+
+    # Look up the host port the controller mapped for this VM's CDP.
+    listing = _request("GET", "/api/vms")
+    host_cdp_port: int | None = None
+    for v in listing.get("vms", []):
+        if v["id"] == resolved:
+            host_cdp_port = v["ports"]["cdp"]
+            break
+
     return {
         **result,
-        "debug_port": port,
-        "chrome_loopback_port": chrome_internal_port,
+        "vm_id": resolved,
+        "container_cdp_port": container_port,
+        "host_cdp_port": host_cdp_port,
+        "chrome_devtools_mcp_url": (
+            f"http://127.0.0.1:{host_cdp_port}" if host_cdp_port else None
+        ),
     }
 
 
 @mcp.tool()
-def kill_chrome() -> dict:
+def kill_chrome(vm_id: str | None = None) -> dict:
     """Force-quit Chrome inside the VM (pgrep patterns exclude this shell)."""
     cmd = (
         "for p in $(pgrep -f \"/opt/[g]oogle/chrome/chrome\"); do kill -9 $p 2>/dev/null || true; done; "
@@ -268,15 +399,23 @@ def kill_chrome() -> dict:
         "sleep 1; "
         "pgrep -af \"/opt/[g]oogle/chrome/chrome\" || echo 'no chrome running'"
     )
-    return _api("POST", "/shell", json={"cmd": cmd, "timeout": 15})
+    return _vm_api(
+        "POST", _resolve_vm_id(vm_id), "shell", json={"cmd": cmd, "timeout": 15}
+    )
+
+
+# ---------------------------------------------------------------------------
+# Apt / installs
+# ---------------------------------------------------------------------------
 
 
 @mcp.tool()
-def list_downloads() -> dict:
+def list_downloads(vm_id: str | None = None) -> dict:
     """List files in /root/Downloads (where Chrome saves files by default)."""
-    return _api(
+    return _vm_api(
         "POST",
-        "/shell",
+        _resolve_vm_id(vm_id),
+        "shell",
         json={"cmd": "ls -la /root/Downloads", "timeout": 10},
     )
 
@@ -286,15 +425,17 @@ def install_apt(
     package: str,
     update: bool = True,
     timeout: Annotated[float, Field(ge=1.0, le=600.0)] = 600.0,
+    vm_id: str | None = None,
 ) -> dict:
     """apt-get install a package by name. Set update=false to skip apt-get update."""
-    parts = []
+    parts: list[str] = []
     if update:
         parts.append("apt-get update")
     parts.append(f"apt-get install -y {shlex.quote(package)}")
-    return _api(
+    return _vm_api(
         "POST",
-        "/shell",
+        _resolve_vm_id(vm_id),
+        "shell",
         json={"cmd": " && ".join(parts), "timeout": timeout},
     )
 
@@ -303,11 +444,13 @@ def install_apt(
 def install_deb(
     deb_path: str,
     timeout: Annotated[float, Field(ge=1.0, le=600.0)] = 600.0,
+    vm_id: str | None = None,
 ) -> dict:
     """Install a local .deb file inside the VM (resolves deps via apt)."""
-    return _api(
+    return _vm_api(
         "POST",
-        "/shell",
+        _resolve_vm_id(vm_id),
+        "shell",
         json={
             "cmd": f"apt-get install -y {shlex.quote(deb_path)}",
             "timeout": timeout,
@@ -321,75 +464,37 @@ def uninstall_apt(
     purge: bool = True,
     autoremove: bool = True,
     timeout: Annotated[float, Field(ge=1.0, le=600.0)] = 600.0,
+    vm_id: str | None = None,
 ) -> dict:
     """apt-get remove (or purge) a package, optionally followed by autoremove."""
     op = "purge" if purge else "remove"
     parts = [f"apt-get {op} -y {shlex.quote(package)}"]
     if autoremove:
         parts.append("apt-get autoremove -y")
-    return _api(
+    return _vm_api(
         "POST",
-        "/shell",
+        _resolve_vm_id(vm_id),
+        "shell",
         json={"cmd": " && ".join(parts), "timeout": timeout},
     )
 
 
 @mcp.tool()
-def list_installed(filter_substr: str | None = None) -> dict:
+def list_installed(
+    filter_substr: str | None = None,
+    vm_id: str | None = None,
+) -> dict:
     """List installed apt packages (name + version). Optional substring filter."""
     base = "dpkg-query -W -f='${Package}\\t${Version}\\n'"
     cmd = f"{base} | sort"
     if filter_substr:
         cmd = f"{base} | grep -i {shlex.quote(filter_substr)} | sort"
-    return _api("POST", "/shell", json={"cmd": cmd, "timeout": 30})
-
-
-@mcp.tool()
-def vm_status() -> dict:
-    """Return ``docker compose ps`` for the VM stack."""
-    return _compose("ps")
-
-
-@mcp.tool()
-def vm_up(rebuild: bool = False) -> dict:
-    """Start the VM (no reset). Set rebuild=true to also rebuild the image."""
-    args = ["up", "-d"]
-    if rebuild:
-        args.append("--build")
-    return _compose(*args)
-
-
-@mcp.tool()
-def vm_down(wipe: bool = False) -> dict:
-    """Stop the VM. Set wipe=true to also remove the /root volume (hard reset on next up)."""
-    args = ["down"]
-    if wipe:
-        args.append("-v")
-    return _compose(*args)
-
-
-@mcp.tool()
-def vm_restart() -> dict:
-    """Soft-restart the VM container. Keeps installed apps and /root contents."""
-    return _compose("restart", COMPOSE_SERVICE)
-
-
-@mcp.tool()
-def vm_reset(rebuild: bool = False) -> dict:
-    """Hard-reset the VM: wipes the /root volume, then brings the stack back up.
-
-    Destroys downloads, browser profile data, and anything installed in the
-    user volume. Image-baseline software (Chrome, XFCE, etc.) survives.
-    Use ``rebuild=true`` to also rebuild the Docker image first.
-    """
-    down = _compose("down", "-v")
-    if down["returncode"] != 0:
-        return {"step": "down", **down}
-    args = ["up", "-d"]
-    if rebuild:
-        args.append("--build")
-    up = _compose(*args)
-    return {"down": down, "up": up}
+    return _vm_api(
+        "POST",
+        _resolve_vm_id(vm_id),
+        "shell",
+        json={"cmd": cmd, "timeout": 30},
+    )
 
 
 if __name__ == "__main__":

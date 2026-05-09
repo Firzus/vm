@@ -1,71 +1,29 @@
 # Cursor-style VM — MCP server
 
 An MCP (Model Context Protocol) server that lets any MCP-compatible AI agent
-(Claude Desktop, Claude Code, Cursor, etc.) drive the Cursor-style VM in this
-repo end-to-end:
-
-- See the desktop (`screenshot`)
-- Click / type / shortcut (`click`, `type_text`, `press_key`, `drag`, ...)
-- Run shell commands inside the VM (`shell`)
-- Open URLs in Chrome (`open_url`)
-- Install / uninstall software (`install_apt`, `install_deb`, `uninstall_apt`)
-- Reset the VM to a clean baseline (`vm_reset`)
-
-This is the natural fit for a "download from Chrome → install → test →
-uninstall → reset → repeat" automation loop.
+(Claude Desktop, Claude Code, Cursor, etc.) drive **multiple Cursor-style VMs
+in parallel** via the controller's HTTP API.
 
 ## Architecture
 
-Two MCP servers are configured in `.mcp.json` at the repo root, but they
-have **distinct, non-overlapping purposes**:
-
-- **cursor-vm** (this server) — desktop drive (click/type/screenshot/shell)
-  + VM lifecycle (`docker compose` up/down/reset). Used by the install /
-  uninstall / reset loop.
-- **chrome-devtools** (Google's `chrome-devtools-mcp@latest`) — Chrome
-  DevTools Protocol tools for **frontend analysis** (network, console,
-  performance, accessibility snapshots). Used independently when the agent
-  needs to inspect a page, not by the install loop. Before using it, call
-  `cursor-vm.launch_chrome_debug` once to start Chrome with the DevTools
-  port attached.
-
-Both run on the host.
-
-```
-                AI agent (Claude / Cursor / ...)
-                          │
-              ┌───────────┴────────────────┐
-              │ MCP (stdio)                │ MCP (stdio)
-              ▼                            ▼
-        cursor-vm (host)            chrome-devtools (host)
-        Python / FastMCP            npx chrome-devtools-mcp@latest
-              │                            │
-   docker     │ HTTP :8000                 │ CDP HTTP / WebSocket
-   compose    │                            │
-              ▼                            ▼
-        cursor-style-vm container (Docker)
-        ┌───────────────────────────────────────────┐
-        │ Chrome ── 127.0.0.1:9223 (CDP loopback)   │
-        │            ▲                              │
-        │            │ socat bridge                 │
-        │ 0.0.0.0:9222 ── forwarded to host:9222 ───┘
-        │ FastAPI :8000 (xdotool / scrot / shell)
-        └───────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    Agent["AI agent (Claude / Cursor / ...)"] -->|MCP stdio| Cvm["cursor-vm MCP\n(this server)"]
+    Agent -->|MCP stdio| Cdm["chrome-devtools-mcp"]
+    Cvm -->|HTTP| Ctrl["Controller :3000"]
+    Cdm -->|"CDP HTTP / WS\n127.0.0.1:{cdp_port}"| VM1
+    Ctrl --> VM1["vm-abc"]
+    Ctrl --> VM2["vm-def"]
 ```
 
-The socat hop is required because modern Chrome ignores
-`--remote-debugging-address=0.0.0.0` and only listens on loopback. The
-`launch_chrome_debug` tool installs and starts socat automatically and
-launches Chrome in a dedicated user-data-dir (Chrome also refuses CDP on
-the default profile).
+This server runs **on the host** and only knows the controller URL. Every
+desktop tool (`screenshot`, `click`, `shell`, `install_apt`, …) accepts an
+optional `vm_id`. If exactly one VM is running it's used by default; with
+multiple VMs the agent must specify which one.
 
-This server runs **on the host** (not inside the container), because:
-
-- Desktop-drive tools call the FastAPI automation server already exposed at
-  `http://localhost:8000` (see `automation/server.py`).
-- VM lifecycle tools (`vm_reset`, `vm_up`, `vm_down`, `vm_restart`) call
-  `docker compose` directly — that has to happen on the host or the VM would
-  be unable to reset itself.
+The controller is the only service required besides Docker — it owns the
+Docker daemon, builds the VM image when missing, allocates loopback ports,
+and reverse-proxies every per-VM call.
 
 ## Setup
 
@@ -77,11 +35,13 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Make sure the VM is up at least once so port 8000 responds:
+Make sure the controller is up first:
 
 ```powershell
-docker compose up -d --build
-curl http://localhost:8000/health
+cd ..\controller
+pnpm install
+pnpm start
+# → http://localhost:3000
 ```
 
 ## Run it standalone (sanity check)
@@ -90,8 +50,8 @@ curl http://localhost:8000/health
 python server.py
 ```
 
-The server speaks MCP over stdio, so this will just sit waiting for a client.
-Hit Ctrl+C to exit. Real usage is via an MCP host (below).
+The server speaks MCP over stdio so this just sits waiting for a client.
+`Ctrl+C` to exit. Real usage is via an MCP host.
 
 ## Register with Claude Desktop
 
@@ -104,116 +64,119 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` and add:
       "command": "C:\\Users\\User\\Documents\\repository\\vm\\mcp-server\\.venv\\Scripts\\python.exe",
       "args": ["C:\\Users\\User\\Documents\\repository\\vm\\mcp-server\\server.py"],
       "env": {
-        "VM_API_URL": "http://localhost:8000",
-        "VM_COMPOSE_DIR": "C:\\Users\\User\\Documents\\repository\\vm"
+        "CONTROLLER_URL": "http://localhost:3000"
       }
     }
   }
 }
 ```
 
-Restart Claude Desktop. The `cursor-vm` tools should appear in the tool picker.
+Restart Claude Desktop. The `cursor-vm` tools appear in the tool picker.
 
 ## Register with Claude Code
 
 ```powershell
 claude mcp add cursor-vm `
-  --env VM_API_URL=http://localhost:8000 `
-  --env VM_COMPOSE_DIR=C:\Users\User\Documents\repository\vm `
+  --env CONTROLLER_URL=http://localhost:3000 `
   -- C:\Users\User\Documents\repository\vm\mcp-server\.venv\Scripts\python.exe `
      C:\Users\User\Documents\repository\vm\mcp-server\server.py
 ```
 
 ## Environment variables
 
-| Var                  | Default                       | Purpose                              |
-| -------------------- | ----------------------------- | ------------------------------------ |
-| `VM_API_URL`         | `http://localhost:8000`       | Where the in-VM FastAPI server lives |
-| `VM_COMPOSE_DIR`     | parent of this folder         | Where `docker-compose.yml` lives     |
-| `VM_COMPOSE_SERVICE` | `vm`                          | Service name to restart              |
+| Var              | Default                  | Purpose                                |
+| ---------------- | ------------------------ | -------------------------------------- |
+| `CONTROLLER_URL` | `http://localhost:3000`  | Where the Next.js controller listens   |
 
 ## Tool reference
 
-### Vision / meta
+### Lifecycle (controller-level, no `vm_id` needed)
 
-- `health()` — the in-VM API is up
-- `screen_size()` — desktop dimensions
-- `cursor_position()` — current mouse coords
-- `list_windows()` — open windows (id, desktop, title)
-- `screenshot()` — PNG of the desktop
+- `list_vms()` — returns every VM the controller knows about
+- `create_vm(label?, memory_mb?, cpus?)` — spin up a fresh container
+- `delete_vm(vm_id, wipe=True)` — stop + remove container, drop volume
+- `reset_vm(vm_id, wipe=True)` — recreate container, optionally wipe volume
+- `restart_vm(vm_id)` — soft restart (keeps volume)
 
-### Mouse / keyboard
+### Vision / meta (per-VM)
 
-- `move_mouse(x, y)`
-- `click(x, y, button="left", clicks=1)`
-- `double_click(x, y)`
-- `right_click(x, y)`
-- `scroll(x, y, direction="down", amount=3)`
-- `drag(from_x, from_y, to_x, to_y, button="left")`
-- `type_text(text, delay_ms=12)`
-- `press_key(keys, repeat=1)` — xdotool syntax (`ctrl+t`, `Return`, `alt+F4`)
+- `health(vm_id?)` — the in-VM API is up
+- `screen_size(vm_id?)` — desktop dimensions
+- `cursor_position(vm_id?)` — current mouse coords
+- `list_windows(vm_id?)` — open windows (id, desktop, title)
+- `screenshot(vm_id?)` — PNG of the desktop
 
-### System
+### Mouse / keyboard (per-VM)
 
-- `shell(cmd, timeout=60)` — arbitrary shell inside the VM
-- `launch_app(name)` — launch a detached desktop app
+- `move_mouse(x, y, vm_id?)`
+- `click(x, y, button="left", clicks=1, vm_id?)`
+- `double_click(x, y, vm_id?)`
+- `right_click(x, y, vm_id?)`
+- `scroll(x, y, direction="down", amount=3, vm_id?)`
+- `drag(from_x, from_y, to_x, to_y, button="left", vm_id?)`
+- `type_text(text, delay_ms=12, vm_id?)`
+- `press_key(keys, repeat=1, vm_id?)` — xdotool syntax (`ctrl+t`, `Return`, `alt+F4`)
 
-### Chrome / install / uninstall
+### System (per-VM)
 
-- `open_url(url)` — open a URL in Chrome (`--no-sandbox` is set automatically)
-- `launch_chrome_debug(url=None, port=9222)` — launch Chrome with the
-  DevTools Protocol exposed on `localhost:9222` (host) so
-  `chrome-devtools-mcp` can attach. Installs and runs `socat` as needed.
-- `kill_chrome()` — force-quit any running Chrome (uses a regex trick so
-  the kill itself is not matched by `pgrep -f`).
-- `list_downloads()` — `ls -la /root/Downloads`
-- `install_apt(package, update=true)`
-- `install_deb(deb_path)`
-- `uninstall_apt(package, purge=true, autoremove=true)`
-- `list_installed(filter_substr=None)`
+- `shell(cmd, timeout=60, vm_id?)` — arbitrary shell inside the VM
+- `launch_app(name, vm_id?)` — launch a detached desktop app
 
-### VM lifecycle (host-side)
+### Chrome / install / uninstall (per-VM)
 
-- `vm_status()` — `docker compose ps`
-- `vm_up(rebuild=false)` — start, optionally rebuild the image
-- `vm_down(wipe=false)` — stop, optionally drop the /root volume
-- `vm_restart()` — soft restart (keeps installed apps)
-- `vm_reset(rebuild=false)` — **hard reset**: wipe /root, then bring the stack back up
+- `open_url(url, vm_id?)` — open in Chrome (`--no-sandbox` is set automatically)
+- `launch_chrome_debug(url=None, vm_id?)` — launch Chrome with the DevTools
+  Protocol exposed. Returns `{ host_cdp_port, chrome_devtools_mcp_url, ... }`
+  so you can point `chrome-devtools-mcp` at the right port.
+- `kill_chrome(vm_id?)` — force-quit Chrome
+- `list_downloads(vm_id?)` — `ls -la /root/Downloads`
+- `install_apt(package, update=true, vm_id?)`
+- `install_deb(deb_path, vm_id?)`
+- `uninstall_apt(package, purge=true, autoremove=true, vm_id?)`
+- `list_installed(filter_substr=None, vm_id?)`
 
 ## Project-scoped MCP registration (`.mcp.json`)
 
-This repo ships a `.mcp.json` at the root that registers both servers for
+The repo ships a `.mcp.json` at the root that registers both servers for
 Claude Code in project scope. Open the repo, accept the project servers
 once, and both `cursor-vm` and `chrome-devtools` are immediately available.
+
+Note: `chrome-devtools-mcp` is no longer pre-pointed at a fixed
+`http://127.0.0.1:9222`. Each VM has its own CDP host port — call
+`cursor-vm.launch_chrome_debug({ vm_id })` to discover it, then either
+restart the chrome-devtools MCP with `--browserUrl=...` or use the smoke
+test below as a template.
 
 ## Typical loop the agent would run
 
 Uses **only `cursor-vm`** (chrome-devtools-mcp is unrelated):
 
-1. `cursor-vm.vm_reset()` — clean slate
+1. `cursor-vm.create_vm({ label: "test" })` — fresh sandbox
 2. Trigger the download:
-   - first try `cursor-vm.shell({ cmd: "cd /root/Downloads && curl -fL -O -J <url>" })`
-   - if the URL needs a real browser, `cursor-vm.open_url(url)` + read
-     a `cursor-vm.screenshot()` and `cursor-vm.click(x, y)` on the
-     download button
-3. Poll `cursor-vm.list_downloads()` until the installer file appears
-4. `cursor-vm.install_deb("/root/Downloads/<file>")`
-5. `cursor-vm.launch_app("opera --no-sandbox")` + `cursor-vm.screenshot()`
-6. `cursor-vm.uninstall_apt("opera-stable")`
-7. `cursor-vm.vm_reset()` and start the next case
+   - first try `cursor-vm.shell({ vm_id, cmd: "cd /root/Downloads && curl -fL -O -J <url>" })`
+   - if the URL needs a real browser, `cursor-vm.open_url({ vm_id, url })`,
+     read a `cursor-vm.screenshot({ vm_id })` and click on the download
+     button
+3. Poll `cursor-vm.list_downloads({ vm_id })` until the installer file appears
+4. `cursor-vm.install_deb({ vm_id, deb_path: "/root/Downloads/<file>" })`
+5. `cursor-vm.launch_app({ vm_id, name: "opera --no-sandbox" })` +
+   `cursor-vm.screenshot({ vm_id })`
+6. `cursor-vm.uninstall_apt({ vm_id, package: "opera-stable" })`
+7. `cursor-vm.delete_vm({ vm_id, wipe: true })` and start the next case
 
 A Claude Code skill that walks through this loop is provided at
-`.claude/skills/vm-test-app-install/SKILL.md`.
+[`.claude/skills/vm-test-app-install/SKILL.md`](../.claude/skills/vm-test-app-install/SKILL.md).
 
 ## Smoke tests
 
-Run from the repo root once the VM is up (`docker compose up -d --build`):
+Run from the repo root once the controller is up (`cd controller && pnpm start`):
 
 ```powershell
-# cursor-vm itself
+# cursor-vm itself: creates a VM, exercises desktop/system tools, deletes it
 .\mcp-server\.venv\Scripts\python.exe mcp-server\smoke_test_cursor_vm.py
 
-# chrome-devtools-mcp -> Chrome inside the VM (requires launch_chrome_debug
-# to have been called first)
+# chrome-devtools-mcp -> Chrome inside one of the VMs (creates one if needed,
+# launches Chrome with CDP, then drives chrome-devtools-mcp at the per-VM
+# host port)
 .\mcp-server\.venv\Scripts\python.exe mcp-server\smoke_test_cdm.py
 ```

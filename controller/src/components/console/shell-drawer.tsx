@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, X } from "lucide-react";
-import { vmClient } from "@/lib/vm-client";
+import { createVmClient } from "@/lib/vm-client";
 import { cn } from "@/lib/utils";
 
 type Line = { id: number; kind: "in" | "out" | "err" | "sys"; text: string };
@@ -12,15 +12,17 @@ const nextId = () => ++counter;
 type Props = {
   open: boolean;
   onClose: () => void;
+  vmId: string;
 };
 
-export function ShellDrawer({ open, onClose }: Props) {
+export function ShellDrawer({ open, onClose, vmId }: Props) {
+  const client = useMemo(() => createVmClient(vmId), [vmId]);
   const [lines, setLines] = useState<Line[]>(() => [
     {
       id: nextId(),
       kind: "sys",
       text:
-        "Connected to /api/vm/shell — commands run in the VM container as root.",
+        `Connected to /api/vm/${vmId}/shell — commands run in the VM container as root.`,
     },
   ]);
   const [cmd, setCmd] = useState("");
@@ -70,7 +72,7 @@ export function ShellDrawer({ open, onClose }: Props) {
     setHistory((h) => [trimmed, ...h].slice(0, 100));
     setHistoryIdx(null);
     try {
-      const res = await vmClient.shell(trimmed, 30);
+      const res = await client.shell(trimmed, 30);
       const out = res.stdout?.trimEnd();
       const err = res.stderr?.trimEnd();
       if (out) setLines((p) => [...p, { id: nextId(), kind: "out", text: out }]);
@@ -134,7 +136,7 @@ export function ShellDrawer({ open, onClose }: Props) {
           />
           <span className="font-medium text-foreground">Host shell</span>
           <span className="text-foreground/30">·</span>
-          <span className="font-mono text-[11px]">/api/vm/shell</span>
+          <span className="font-mono text-[11px]">{`/api/vm/${vmId}/shell`}</span>
         </div>
         <div className="flex items-center gap-1">
           <button

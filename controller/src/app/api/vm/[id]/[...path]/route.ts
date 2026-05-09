@@ -1,8 +1,19 @@
+/**
+ * Per-VM HTTP reverse proxy. The browser and the host MCP only ever talk to
+ * the controller; this route forwards each call to the in-VM automation API
+ * (FastAPI on container port 8000, published on a loopback port we look up
+ * via the VM registry).
+ *
+ *   /api/vm/{id}/screenshot         →   http://127.0.0.1:{apiPort}/screenshot
+ *   /api/vm/{id}/shell  (POST)      →   http://127.0.0.1:{apiPort}/shell
+ *   /api/vm/{id}/click  (POST)      →   http://127.0.0.1:{apiPort}/click
+ */
 import { NextRequest, NextResponse } from "next/server";
-import { VM_API_INTERNAL } from "@/lib/config";
+import { getRegistry } from "@/lib/vms";
+import { VmIdParam } from "@/lib/schemas";
 
-export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const HOP_BY_HOP = new Set([
   "connection",
@@ -17,16 +28,28 @@ const HOP_BY_HOP = new Set([
   "content-length",
 ]);
 
-async function proxy(req: NextRequest, segments: string[]) {
+type Ctx = { params: Promise<{ id: string; path: string[] }> };
+
+async function proxy(req: NextRequest, vmId: string, segments: string[]) {
+  const idCheck = VmIdParam.safeParse(vmId);
+  if (!idCheck.success) {
+    return NextResponse.json({ error: "invalid_vm_id" }, { status: 400 });
+  }
+
+  const registry = getRegistry();
+  await registry.bootstrap();
+  const vm = registry.get(idCheck.data);
+  if (!vm) {
+    return NextResponse.json({ error: "vm_not_found" }, { status: 404 });
+  }
+
   const targetPath = segments.map(encodeURIComponent).join("/");
   const search = req.nextUrl.search ?? "";
-  const url = `${VM_API_INTERNAL}/${targetPath}${search}`;
+  const url = `http://127.0.0.1:${vm.ports.api}/${targetPath}${search}`;
 
   const headers = new Headers();
   for (const [key, value] of req.headers) {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
-      headers.set(key, value);
-    }
+    if (!HOP_BY_HOP.has(key.toLowerCase())) headers.set(key, value);
   }
   headers.delete("host");
 
@@ -35,7 +58,6 @@ async function proxy(req: NextRequest, segments: string[]) {
     headers,
     redirect: "manual",
   };
-
   if (!["GET", "HEAD"].includes(req.method)) {
     init.body = await req.arrayBuffer();
   }
@@ -56,9 +78,7 @@ async function proxy(req: NextRequest, segments: string[]) {
 
   const responseHeaders = new Headers();
   upstream.headers.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
-      responseHeaders.set(key, value);
-    }
+    if (!HOP_BY_HOP.has(key.toLowerCase())) responseHeaders.set(key, value);
   });
 
   return new NextResponse(upstream.body, {
@@ -68,11 +88,9 @@ async function proxy(req: NextRequest, segments: string[]) {
   });
 }
 
-type Ctx = { params: Promise<{ path: string[] }> };
-
 async function handler(req: NextRequest, ctx: Ctx) {
-  const { path } = await ctx.params;
-  return proxy(req, path);
+  const { id, path } = await ctx.params;
+  return proxy(req, id, path);
 }
 
 export {

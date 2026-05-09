@@ -1,10 +1,19 @@
+/**
+ * Per-VM HTTP client. Every action goes through `/api/vm/{vmId}/...` so the
+ * browser only ever hits the controller.
+ *
+ * Use `createVmClient(vmId)` to bind a client to one VM, or call the helpers
+ * with a `vmId` argument when you don't have a stable instance.
+ */
+
 const BASE = "/api/vm";
 
 async function request<T>(
+  vmId: string,
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const res = await fetch(`${BASE}/${path}`, {
+  const res = await fetch(`${BASE}/${encodeURIComponent(vmId)}/${path}`, {
     ...init,
     headers: {
       "content-type": "application/json",
@@ -25,23 +34,39 @@ async function request<T>(
 
 export type Health = { status: string; display: string };
 export type ScreenSize = { width: number; height: number };
-
-export const vmClient = {
-  health: () => request<Health>("health"),
-  screenSize: () => request<ScreenSize>("screen_size"),
-  shell: (cmd: string, timeout = 30) =>
-    request<{
-      cmd: string;
-      returncode: number;
-      stdout: string;
-      stderr: string;
-    }>("shell", {
-      method: "POST",
-      body: JSON.stringify({ cmd, timeout }),
-    }),
-  launch: (name: string) =>
-    request<{ ok: boolean; launched: string; log: string }>(
-      `launch?name=${encodeURIComponent(name)}`,
-      { method: "POST" },
-    ),
+export type ShellResult = {
+  cmd: string;
+  returncode: number;
+  stdout: string;
+  stderr: string;
 };
+export type LaunchResult = { ok: boolean; launched: string; log: string };
+
+export interface VmClient {
+  health: () => Promise<Health>;
+  screenSize: () => Promise<ScreenSize>;
+  shell: (cmd: string, timeout?: number) => Promise<ShellResult>;
+  launch: (name: string) => Promise<LaunchResult>;
+  /** URL to the screenshot endpoint (forced fresh via the timestamp). */
+  screenshotUrl: () => string;
+}
+
+export function createVmClient(vmId: string): VmClient {
+  return {
+    health: () => request<Health>(vmId, "health"),
+    screenSize: () => request<ScreenSize>(vmId, "screen_size"),
+    shell: (cmd, timeout = 30) =>
+      request<ShellResult>(vmId, "shell", {
+        method: "POST",
+        body: JSON.stringify({ cmd, timeout }),
+      }),
+    launch: (name) =>
+      request<LaunchResult>(
+        vmId,
+        `launch?name=${encodeURIComponent(name)}`,
+        { method: "POST" },
+      ),
+    screenshotUrl: () =>
+      `${BASE}/${encodeURIComponent(vmId)}/screenshot?ts=${Date.now()}`,
+  };
+}

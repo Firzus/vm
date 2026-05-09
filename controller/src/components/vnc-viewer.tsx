@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import type RFBType from "@novnc/novnc";
 import { cn } from "@/lib/utils";
-import { VM_VNC_HOST, VM_VNC_PORT, VM_VNC_PASSWORD } from "@/lib/config";
+import { VM_VNC_PASSWORD } from "@/lib/config";
 
 export type VncStatus =
   | "idle"
@@ -13,6 +13,8 @@ export type VncStatus =
   | "error";
 
 type Props = {
+  /** Path of the WebSocket endpoint relative to the page origin, e.g. `/api/vm/abc/novnc`. */
+  wsPath: string;
   password?: string;
   onStatusChange?: (status: VncStatus, message?: string) => void;
   onResize?: (size: { width: number; height: number }) => void;
@@ -25,6 +27,7 @@ type Props = {
  * desktop is letterboxed instead of cropped on resize.
  */
 export function VncViewer({
+  wsPath,
   password = VM_VNC_PASSWORD,
   onStatusChange,
   onResize,
@@ -52,7 +55,7 @@ export function VncViewer({
         const RFB = (mod as unknown as { default: typeof RFBType }).default;
 
         const proto = window.location.protocol === "https:" ? "wss" : "ws";
-        const wsUrl = `${proto}://${VM_VNC_HOST}:${VM_VNC_PORT}/websockify`;
+        const wsUrl = `${proto}://${window.location.host}${wsPath}`;
 
         instance = new RFB(node, wsUrl, {
           credentials: { password },
@@ -61,16 +64,11 @@ export function VncViewer({
 
         rfbRef.current = instance;
 
-        // Local scaling: GPU-scale the remote framebuffer to fit our 16:9
-        // container. Combined with `clipViewport=false`, this guarantees the
-        // desktop is letterboxed inside its parent and never cropped.
         instance.scaleViewport = true;
         instance.resizeSession = false;
         instance.clipViewport = false;
         instance.viewOnly = false;
         instance.background = "transparent";
-        // Use the real remote cursor (Bibata, set by xsettings inside the VM)
-        // and hide the fallback dot when one isn't reported.
         instance.showDotCursor = false;
 
         const onConnect = () => {
@@ -91,8 +89,6 @@ export function VncViewer({
         };
         const onDesktopName = () => {
           if (!node) return;
-          // Read the *remote* framebuffer size from the canvas RFB created
-          // inside our container, not the container's CSS size.
           const canvas = node.querySelector("canvas");
           if (canvas?.width && canvas?.height) {
             onResize?.({ width: canvas.width, height: canvas.height });
@@ -117,7 +113,7 @@ export function VncViewer({
       rfbRef.current = null;
       if (node) node.innerHTML = "";
     };
-  }, [password, onStatusChange, onResize]);
+  }, [wsPath, password, onStatusChange, onResize]);
 
   return (
     <div

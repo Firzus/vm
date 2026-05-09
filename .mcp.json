@@ -4,8 +4,7 @@
       "command": "C:/Users/User/Documents/repository/vm/mcp-server/.venv/Scripts/python.exe",
       "args": ["C:/Users/User/Documents/repository/vm/mcp-server/server.py"],
       "env": {
-        "VM_API_URL": "http://localhost:8000",
-        "VM_COMPOSE_DIR": "C:/Users/User/Documents/repository/vm"
+        "CONTROLLER_URL": "http://localhost:3000"
       }
     },
     "chrome-devtools": {
@@ -15,7 +14,6 @@
         "npx",
         "-y",
         "chrome-devtools-mcp@latest",
-        "--browserUrl=http://127.0.0.1:9222",
         "--logFile=C:/Users/User/Documents/repository/vm/mcp-server/.cdm-mcp.log"
       ],
       "env": {

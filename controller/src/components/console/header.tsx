@@ -8,15 +8,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { VM_VNC_HOST, VM_VNC_PORT } from "@/lib/config";
 import type { VncStatus } from "@/components/vnc-viewer";
+import type { Vm } from "@/lib/schemas";
 
 type Props = {
+  /** Currently visible VM (active tab), or null if no VMs exist yet. */
+  vm: Vm | null;
   status: VncStatus;
   size: { width: number; height: number } | null;
 };
 
-export function ConsoleHeader({ status, size }: Props) {
+export function ConsoleHeader({ vm, status, size }: Props) {
   const [time, setTime] = useState<string>("");
 
   useEffect(() => {
@@ -41,9 +43,21 @@ export function ConsoleHeader({ status, size }: Props) {
 
       <span className="text-foreground/20">/</span>
 
-      <span className="font-mono text-[11px] text-muted-foreground">
-        {VM_VNC_HOST}:{VM_VNC_PORT}
-      </span>
+      {vm ? (
+        <>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {vm.label || vm.name}
+          </span>
+          <span className="text-foreground/20">·</span>
+          <span className="font-mono text-[10px] text-muted-foreground/70">
+            api:{vm.ports.api} · vnc:{vm.ports.novnc} · cdp:{vm.ports.cdp}
+          </span>
+        </>
+      ) : (
+        <span className="font-mono text-[11px] text-muted-foreground">
+          no vm
+        </span>
+      )}
 
       {size && (
         <>
@@ -60,34 +74,38 @@ export function ConsoleHeader({ status, size }: Props) {
         <span className="font-mono text-[11px] text-muted-foreground">
           {time}
         </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <a
-              href="http://localhost:8000/docs"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Open API docs"
-              className="grid size-6 place-items-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            >
-              <BookText className="size-3.5" />
-            </a>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">API documentation</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <a
-              href="http://localhost:6080/vnc.html?autoconnect=1&password=agent"
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Open raw noVNC"
-              className="grid size-6 place-items-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            >
-              <ExternalLink className="size-3.5" />
-            </a>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">Raw noVNC client</TooltipContent>
-        </Tooltip>
+        {vm && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a
+                href={`/api/vm/${encodeURIComponent(vm.id)}/docs`}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open VM API docs"
+                className="grid size-6 place-items-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              >
+                <BookText className="size-3.5" />
+              </a>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">VM API documentation</TooltipContent>
+          </Tooltip>
+        )}
+        {vm && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <a
+                href={`http://127.0.0.1:${vm.ports.novnc}/vnc.html?autoconnect=1&password=agent`}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Open raw noVNC for this VM"
+                className="grid size-6 place-items-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              >
+                <ExternalLink className="size-3.5" />
+              </a>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Raw noVNC client</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </header>
   );

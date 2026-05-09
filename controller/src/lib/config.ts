@@ -1,14 +1,8 @@
-export const VM_API_URL =
-  process.env.NEXT_PUBLIC_VM_API_URL ?? "http://localhost:8000";
+/**
+ * Shared client-safe constants. Per-VM ports / hosts are NOT here anymore —
+ * the client only ever talks to the controller (`/api/vm/{id}/...`), and the
+ * controller knows where each VM lives.
+ */
 
-export const VM_VNC_HOST =
-  process.env.NEXT_PUBLIC_VM_VNC_HOST ?? "localhost";
-
-export const VM_VNC_PORT = Number(
-  process.env.NEXT_PUBLIC_VM_VNC_PORT ?? "6080",
-);
-
-export const VM_VNC_PASSWORD =
-  process.env.NEXT_PUBLIC_VM_VNC_PASSWORD ?? "agent";
-
-export const VM_API_INTERNAL = process.env.VM_API_URL ?? VM_API_URL;
+/** Default VNC password baked into every VM at create time. */
+export const VM_VNC_PASSWORD = "agent";

@@ -34,7 +34,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="font-sans antialiased">
-        <TooltipProvider delayDuration={150}>{children}</TooltipProvider>
+        <TooltipProvider delayDuration={150}>
+          <div className="h-screen w-screen">{children}</div>
+        </TooltipProvider>
       </body>
     </html>
   );

@@ -31,14 +31,22 @@ export function BootLoader({
 
   useEffect(() => {
     if (!active) return;
-    setDone(0);
+    let cancelled = false;
     let i = 0;
+    // Avoid a synchronous setState in the effect body — defer to a microtask
+    // so React doesn't flag a cascading render.
+    queueMicrotask(() => {
+      if (!cancelled) setDone(0);
+    });
     const id = setInterval(() => {
       i += 1;
-      setDone(i);
+      if (!cancelled) setDone(i);
       if (i >= STEPS.length) clearInterval(id);
     }, 220);
-    return () => clearInterval(id);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [active]);
 
   return (
