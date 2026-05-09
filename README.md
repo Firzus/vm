@@ -32,7 +32,7 @@ docker compose up --build
 
 Wait until you see the `Cursor-style VM is ready.` banner, then open:
 
-- Cursor-style console (recommended): <http://localhost:3000> -- run `cd ui && npm install && npm run dev` first
+- Cursor-style console (recommended): <http://localhost:3000> -- run `cd ui && pnpm install && pnpm dev` first
 - Raw desktop in browser: <http://localhost:6080/vnc.html?autoconnect=1&resize=remote&password=agent>
 - Native VNC client: `localhost:5901` (password: `agent`)
 - Automation API docs (Swagger UI): <http://localhost:8000/docs>

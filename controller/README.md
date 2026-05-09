@@ -7,8 +7,8 @@ launcher, restart and reconnect controls.
 ## Run
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 Then open <http://localhost:3000>.
