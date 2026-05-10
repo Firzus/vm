@@ -140,13 +140,13 @@ For agent-style usage (Claude Desktop, Claude Code, Cursor…), two MCP servers 
 - **`cursor-vm`** ([`apps/mcp-server/`](./apps/mcp-server)) — multi-VM lifecycle (`create_vm`, `delete_vm`, `reset_vm`, `list_vms`) plus per-VM desktop drive (`screenshot`, `click`, `shell`, `install_apt`, …). Every desktop tool takes an optional `vm_id`; if exactly one VM is running it's used by default.
 - **`chrome-devtools`** — Google's [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp). Get the right host CDP port by calling `cursor-vm.launch_chrome_debug({ vm_id })` first; the result includes `host_cdp_port` and `chrome_devtools_mcp_url`. Pass that URL to `chrome-devtools-mcp` via `--browserUrl=…`.
 
-The MCP servers config is single-sourced in [`.mcp.json`](./.mcp.json) (canonical, read by Claude Code at the repo root). After editing it, run the sync script to refresh [`.cursor/mcp.json`](./.cursor/mcp.json) (read by Cursor):
+The MCP servers config is rendered from a single template, [`.mcp.template.json`](./.mcp.template.json), into the two locations Claude Code and Cursor expect. The generated files (`.mcp.json` at the repo root, `.cursor/mcp.json`) are user-local and gitignored — every contributor regenerates them after cloning:
 
 ```bash
 node scripts/sync-mcp.mjs
 ```
 
-Both files are committed and kept byte-identical, so a single edit in `.mcp.json` is enough.
+The script resolves `${REPO_ROOT}` to the absolute path of your checkout and `${PYTHON}` to the per-platform venv interpreter, so no machine-specific paths ever land in git. Re-run it after editing the template.
 
 ### The install / uninstall / reset loop
 
@@ -237,10 +237,9 @@ vm/
 │       ├── chrome/             Managed policies + first-run prefs
 │       └── theme/              XFCE / Plank / GTK theme bundle
 ├── scripts/
-│   └── sync-mcp.mjs            Single-source MCP config sync
-├── .mcp.json                   MCP servers for Claude Code (canonical)
+│   └── sync-mcp.mjs            Renders .mcp.template.json into local MCP configs
+├── .mcp.template.json          Committed template (no machine-specific paths)
 └── .cursor/
-    ├── mcp.json                MCP servers for Cursor (synced from .mcp.json)
     └── skills/
         └── vm-test-app-install/SKILL.md   Install/uninstall/delete loop skill
 ```

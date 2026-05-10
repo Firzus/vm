@@ -45,7 +45,7 @@ VM image (built automatically by the controller on first `pnpm start`; only run 
 docker build -f vm-image/Dockerfile -t cursor-style-vm:latest .  # (unverified, slow)
 ```
 
-MCP config sync (`.mcp.json` is the canonical source; mirrors to `.cursor/mcp.json`):
+MCP config render (`.mcp.template.json` → `.mcp.json` + `.cursor/mcp.json`, both gitignored):
 
 ```bash
 node scripts/sync-mcp.mjs
@@ -64,7 +64,7 @@ No JS test runner is configured. Use `pnpm typecheck && pnpm lint` (in `apps/con
 - Data fetching: SWR + an SSE subscription on `/api/events` (see `src/lib/useVms.ts`). Don't poll Docker directly from the client.
 - VM container ports: API `8000`, noVNC `6080`, VNC `5901`. Host-side they're allocated dynamically from `VM_PORT_*_BASE` and bound on `127.0.0.1` only.
 - Python (`automation/`, `apps/mcp-server/`): pinned `requirements.txt`, FastAPI + Pydantic v2, `from __future__ import annotations`. The MCP server reads `CONTROLLER_URL` (default `http://localhost:3000`).
-- MCP config is single-sourced: edit `.mcp.json` (canonical), then run `node scripts/sync-mcp.mjs` to refresh `.cursor/mcp.json`. Never edit `.cursor/mcp.json` by hand.
+- MCP config is rendered from `.mcp.template.json` (committed) by `node scripts/sync-mcp.mjs`. Never edit `.mcp.json` or `.cursor/mcp.json` by hand — they are gitignored, generated per-machine, and overwritten on every render. The template uses `${REPO_ROOT}` and `${PYTHON}` placeholders to stay portable.
 - Search excludes: `node_modules/`, `.next/`, `out/`, `build/`, `apps/controller/pnpm-lock.yaml`, `**/.venv/`, `.cursor/screens/`.
 
 ## Dos and Don'ts
@@ -80,7 +80,7 @@ No JS test runner is configured. Use `pnpm typecheck && pnpm lint` (in `apps/con
 
 ## Safety & Guardrails
 
-- Off-limits without explicit user request: pushing to `origin`, force-push, rewriting history, building/publishing the VM image, running smoke tests that create real containers, deleting Docker volumes, modifying `.mcp.json` / `.cursor/mcp.json` server paths.
+- Off-limits without explicit user request: pushing to `origin`, force-push, rewriting history, building/publishing the VM image, running smoke tests that create real containers, deleting Docker volumes, modifying `.mcp.template.json` server entries.
 - Never edit generated/vendored content: `apps/controller/.next/`, `apps/controller/node_modules/`, `apps/controller/pnpm-lock.yaml` (regenerate via pnpm only), `apps/mcp-server/.venv/`, `**/*.tsbuildinfo`, `apps/controller/next-env.d.ts`.
 - Never commit `.env`, `.env.local`, VNC passwords, or tokens. The default `VM_VNC_PASSWORD=agent` is for local-only loopback use; do not surface it in logs or UI.
 - Treat `vm-image/Dockerfile`, `vm-image/entrypoint.sh`, `vm-image/assets/theme/build-theme.sh`, and `vm-image/assets/chrome/policies/cursor-vm.json` as security-sensitive — reviewer should look twice.
