@@ -20,10 +20,11 @@ function loadEnv(): Env {
     );
   }
   // Default the repo dir to the parent of the controller package, where the
-  // VM Dockerfile lives.
+  // VM Dockerfile lives. The controller now lives at `apps/controller/`, so
+  // the repo root is two levels up from `process.cwd()`.
   const env = result.data;
   if (!env.VM_REPO_DIR) {
-    env.VM_REPO_DIR = path.resolve(process.cwd(), "..");
+    env.VM_REPO_DIR = path.resolve(process.cwd(), "..", "..");
   }
   return env;
 }

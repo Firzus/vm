@@ -10,12 +10,12 @@ Lifecycle covered:
   7. list_vms (final, expect empty unless other VMs exist)
 
 Pre-requisites:
-  - Controller is up:  cd controller && pnpm start  (http://localhost:3000)
+  - Controller is up:  cd apps/controller && pnpm start  (http://localhost:3000)
   - Docker daemon reachable.
 
 Usage from the repo root:
 
-    .\\mcp-server\\.venv\\Scripts\\python.exe mcp-server\\smoke_test_cursor_vm.py
+    .\\apps\\mcp-server\\.venv\\Scripts\\python.exe apps\\mcp-server\\smoke_test_cursor_vm.py
 """
 
 from __future__ import annotations
@@ -29,9 +29,10 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-REPO = Path(__file__).resolve().parent.parent
-PYTHON = REPO / "mcp-server" / ".venv" / "Scripts" / "python.exe"
-SERVER = REPO / "mcp-server" / "server.py"
+# Script lives at <repo>/apps/mcp-server/smoke_test_cursor_vm.py — climb two levels.
+REPO = Path(__file__).resolve().parent.parent.parent
+PYTHON = REPO / "apps" / "mcp-server" / ".venv" / "Scripts" / "python.exe"
+SERVER = REPO / "apps" / "mcp-server" / "server.py"
 
 
 async def call(

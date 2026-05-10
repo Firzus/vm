@@ -29,7 +29,7 @@ and reverse-proxies every per-VM call.
 
 ```powershell
 # from the repo root
-cd mcp-server
+cd apps\mcp-server
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -61,8 +61,8 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` and add:
 {
   "mcpServers": {
     "cursor-vm": {
-      "command": "C:\\Users\\User\\Documents\\repository\\vm\\mcp-server\\.venv\\Scripts\\python.exe",
-      "args": ["C:\\Users\\User\\Documents\\repository\\vm\\mcp-server\\server.py"],
+      "command": "C:\\Users\\User\\Documents\\repository\\vm\\apps\\mcp-server\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\User\\Documents\\repository\\vm\\apps\\mcp-server\\server.py"],
       "env": {
         "CONTROLLER_URL": "http://localhost:3000"
       }
@@ -78,8 +78,8 @@ Restart Claude Desktop. The `cursor-vm` tools appear in the tool picker.
 ```powershell
 claude mcp add cursor-vm `
   --env CONTROLLER_URL=http://localhost:3000 `
-  -- C:\Users\User\Documents\repository\vm\mcp-server\.venv\Scripts\python.exe `
-     C:\Users\User\Documents\repository\vm\mcp-server\server.py
+  -- C:\Users\User\Documents\repository\vm\apps\mcp-server\.venv\Scripts\python.exe `
+     C:\Users\User\Documents\repository\vm\apps\mcp-server\server.py
 ```
 
 ## Environment variables
@@ -165,18 +165,18 @@ Uses **only `cursor-vm`** (chrome-devtools-mcp is unrelated):
 7. `cursor-vm.delete_vm({ vm_id, wipe: true })` and start the next case
 
 A Cursor skill that walks through this loop is provided at
-[`.cursor/skills/vm-test-app-install/SKILL.md`](../.cursor/skills/vm-test-app-install/SKILL.md).
+[`.cursor/skills/vm-test-app-install/SKILL.md`](../../.cursor/skills/vm-test-app-install/SKILL.md).
 
 ## Smoke tests
 
-Run from the repo root once the controller is up (`cd controller && pnpm start`):
+Run from the repo root once the controller is up (`cd apps\controller && pnpm start`):
 
 ```powershell
 # cursor-vm itself: creates a VM, exercises desktop/system tools, deletes it
-.\mcp-server\.venv\Scripts\python.exe mcp-server\smoke_test_cursor_vm.py
+.\apps\mcp-server\.venv\Scripts\python.exe apps\mcp-server\smoke_test_cursor_vm.py
 
 # chrome-devtools-mcp -> Chrome inside one of the VMs (creates one if needed,
 # launches Chrome with CDP, then drives chrome-devtools-mcp at the per-VM
 # host port)
-.\mcp-server\.venv\Scripts\python.exe mcp-server\smoke_test_cdm.py
+.\apps\mcp-server\.venv\Scripts\python.exe apps\mcp-server\smoke_test_cdm.py
 ```

@@ -9,9 +9,9 @@ Workflow:
   3. Spawn `chrome-devtools-mcp` over stdio with --browserUrl pointing at
      127.0.0.1:{host_cdp_port} and exercise list_pages / navigate_page.
 
-Run from the repo root once the controller is up (cd controller && pnpm start):
+Run from the repo root once the controller is up (cd apps/controller && pnpm start):
 
-    python mcp-server/smoke_test_cdm.py
+    python apps/mcp-server/smoke_test_cdm.py
 """
 
 from __future__ import annotations
@@ -26,9 +26,10 @@ import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-REPO = Path(__file__).resolve().parent.parent
-PYTHON = REPO / "mcp-server" / ".venv" / "Scripts" / "python.exe"
-SERVER = REPO / "mcp-server" / "server.py"
+# Script lives at <repo>/apps/mcp-server/smoke_test_cdm.py — climb two levels.
+REPO = Path(__file__).resolve().parent.parent.parent
+PYTHON = REPO / "apps" / "mcp-server" / ".venv" / "Scripts" / "python.exe"
+SERVER = REPO / "apps" / "mcp-server" / "server.py"
 CONTROLLER_URL = os.environ.get("CONTROLLER_URL", "http://localhost:3000")
 
 
@@ -85,7 +86,7 @@ async def ensure_vm_with_chrome_debug() -> int:
 async def run_cdm(host_port: int) -> int:
     is_win = sys.platform == "win32"
     browser_url = f"--browserUrl=http://127.0.0.1:{host_port}"
-    log_file = "--logFile=mcp-server/.cdm-mcp.log"
+    log_file = "--logFile=apps/mcp-server/.cdm-mcp.log"
     params = StdioServerParameters(
         command="cmd" if is_win else "npx",
         args=(

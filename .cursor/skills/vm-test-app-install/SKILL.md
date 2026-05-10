@@ -25,7 +25,7 @@ starting.
 
 ## Preconditions
 
-- The controller is running (`cd controller && pnpm start`).
+- The controller is running (`cd apps/controller && pnpm start`).
   `cursor-vm.list_vms()` should return successfully.
 
 If the controller is unreachable, surface the error to the user and stop.

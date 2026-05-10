@@ -45,7 +45,7 @@ controller/
         ├── docker.ts             dockerode singleton (named pipe / unix socket)
         ├── vms.ts                VmRegistry (create/list/delete/restart/reset)
         ├── ports.ts              Loopback port allocator
-        ├── image.ts              ensureVmImage (auto-build from ../Dockerfile)
+        ├── image.ts              ensureVmImage (auto-build from ../../Dockerfile)
         ├── schemas.ts            Zod schemas — single source of truth at boundaries
         ├── env.ts                Validated env (parsed once at boot)
         ├── vm-client.ts          Per-VM HTTP client (browser-side)
@@ -88,4 +88,4 @@ on the same custom server.
 ## Configuration
 
 All env vars are validated at boot via `src/lib/env.ts`. See the root README
-for the full list. Set them in `controller/.env.local`.
+for the full list. Set them in `apps/controller/.env.local`.

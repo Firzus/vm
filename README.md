@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./controller/public/onboarding/01-welcome.png" alt="Cursor-style VM — editorial cover plate" width="720" />
+  <img src="./apps/controller/public/onboarding/01-welcome.png" alt="Cursor-style VM — editorial cover plate" width="720" />
 </p>
 
 # Cursor-style VM
@@ -35,9 +35,9 @@ flowchart LR
 
 This repo contains three subprojects:
 
-- **`controller/`** — Next.js 16 + React 19 controller (host). Custom Node server for the noVNC WebSocket upgrade.
+- **`apps/controller/`** — Next.js 16 + React 19 controller (host). Custom Node server for the noVNC WebSocket upgrade.
 - **`automation/`** — FastAPI server that runs **inside** each VM container.
-- **`mcp-server/`** — Python MCP server that wraps the controller's HTTP API for AI agents.
+- **`apps/mcp-server/`** — Python MCP server that wraps the controller's HTTP API for AI agents.
 
 ## Features
 
@@ -59,7 +59,7 @@ This repo contains three subprojects:
 ## Quick start
 
 ```bash
-cd controller
+cd apps/controller
 pnpm install
 pnpm start
 ```
@@ -135,7 +135,7 @@ The SSE stream republishes Docker container events filtered to `label=cursor-vm.
 
 For agent-style usage (Claude Desktop, Claude Code, Cursor…), two MCP servers are wired up in [`.mcp.json`](./.mcp.json) (Claude Code) and [`.cursor/mcp.json`](./.cursor/mcp.json) (Cursor) — distinct purposes:
 
-- **`cursor-vm`** ([`mcp-server/`](./mcp-server)) — multi-VM lifecycle (`create_vm`, `delete_vm`, `reset_vm`, `list_vms`) plus per-VM desktop drive (`screenshot`, `click`, `shell`, `install_apt`, …). Every desktop tool takes an optional `vm_id`; if exactly one VM is running it's used by default.
+- **`cursor-vm`** ([`apps/mcp-server/`](./apps/mcp-server)) — multi-VM lifecycle (`create_vm`, `delete_vm`, `reset_vm`, `list_vms`) plus per-VM desktop drive (`screenshot`, `click`, `shell`, `install_apt`, …). Every desktop tool takes an optional `vm_id`; if exactly one VM is running it's used by default.
 - **`chrome-devtools`** — Google's [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp). Get the right host CDP port by calling `cursor-vm.launch_chrome_debug({ vm_id })` first; the result includes `host_cdp_port` and `chrome_devtools_mcp_url`. Pass that URL to `chrome-devtools-mcp` via `--browserUrl=…`.
 
 ### The install / uninstall / reset loop
@@ -151,12 +151,12 @@ A ready-to-use Cursor skill that walks an agent through this loop is provided at
 
 ## Configuration
 
-All env vars are validated by Zod at boot. Set them in `controller/.env.local`:
+All env vars are validated by Zod at boot. Set them in `apps/controller/.env.local`:
 
-| Variable                                 | Default                  | Description                          |
-| ---------------------------------------- | ------------------------ | ------------------------------------ |
-| `VM_IMAGE`                               | `cursor-style-vm:latest` | Docker image used for every VM       |
-| `VM_REPO_DIR`                            | parent of `controller/`  | Build context for the image          |
+| Variable                                 | Default                       | Description                          |
+| ---------------------------------------- | ----------------------------- | ------------------------------------ |
+| `VM_IMAGE`                               | `cursor-style-vm:latest`      | Docker image used for every VM       |
+| `VM_REPO_DIR`                            | repo root (parent of `apps/`) | Build context for the image          |
 | `VM_MEMORY_MB`                           | `2048`                   | RAM cap per VM                       |
 | `VM_CPUS`                                | `2`                      | vCPU count per VM (fractions ok)     |
 | `VM_SHM_MB`                              | `2048`                   | `/dev/shm` size (Chrome benefits)    |
@@ -191,38 +191,39 @@ flowchart TB
 
 ```text
 vm/
-├── Dockerfile                 VM image — built automatically by the controller
-├── .mcp.json                  MCP servers for Claude Code (project scope)
-├── entrypoint.sh
-├── automation/                FastAPI server running inside each container
+├── apps/                       Host-side services
+│   ├── controller/             Next.js controller (host) + UI
+│   │   ├── server.ts           Custom server: HTTP + noVNC WS proxy
+│   │   ├── package.json
+│   │   └── src/
+│   │       ├── app/
+│   │       │   ├── page.tsx    Tabs shell over N VmConsoles
+│   │       │   └── api/
+│   │       │       ├── vms/... Lifecycle endpoints
+│   │       │       ├── vm/[id]/ Per-VM HTTP proxy
+│   │       │       └── events/ SSE stream of Docker events
+│   │       ├── components/
+│   │       └── lib/
+│   │           ├── docker.ts   dockerode singleton
+│   │           ├── vms.ts      VmRegistry + lifecycle
+│   │           ├── ports.ts    Loopback port allocator
+│   │           ├── image.ts    ensureVmImage (auto-build)
+│   │           ├── schemas.ts  Zod schemas (boundary types)
+│   │           ├── env.ts      Validated env
+│   │           ├── vm-client.ts Per-VM HTTP client (browser)
+│   │           └── useVms.ts   SWR + SSE subscription hook
+│   └── mcp-server/             cursor-vm MCP server (host, multi-VM)
+│       ├── requirements.txt
+│       ├── server.py
+│       └── README.md
+├── automation/                 FastAPI server running inside each VM container
 │   ├── requirements.txt
 │   └── server.py
-├── controller/                Next.js controller (host) + UI
-│   ├── server.ts              Custom server: HTTP + noVNC WS proxy
-│   ├── package.json
-│   └── src/
-│       ├── app/
-│       │   ├── page.tsx       Tabs shell over N VmConsoles
-│       │   └── api/
-│       │       ├── vms/...    Lifecycle endpoints
-│       │       ├── vm/[id]/   Per-VM HTTP proxy
-│       │       └── events/    SSE stream of Docker events
-│       ├── components/
-│       └── lib/
-│           ├── docker.ts      dockerode singleton
-│           ├── vms.ts         VmRegistry + lifecycle
-│           ├── ports.ts       Loopback port allocator
-│           ├── image.ts       ensureVmImage (auto-build)
-│           ├── schemas.ts     Zod schemas (boundary types)
-│           ├── env.ts         Validated env
-│           ├── vm-client.ts   Per-VM HTTP client (browser)
-│           └── useVms.ts      SWR + SSE subscription hook
-├── mcp-server/                cursor-vm MCP server (host, multi-VM)
-│   ├── requirements.txt
-│   ├── server.py
-│   └── README.md
+├── Dockerfile                  VM image — built automatically by the controller
+├── entrypoint.sh
+├── .mcp.json                   MCP servers for Claude Code (project scope)
 └── .cursor/
-    ├── mcp.json               MCP servers for Cursor (project scope)
+    ├── mcp.json                MCP servers for Cursor (project scope)
     └── skills/
         └── vm-test-app-install/SKILL.md   Install/uninstall/delete loop skill
 ```
