@@ -39,6 +39,8 @@ This repo contains three subprojects:
 - **`automation/`** — FastAPI server that runs **inside** each VM container.
 - **`apps/mcp-server/`** — Python MCP server that wraps the controller's HTTP API for AI agents.
 
+The VM image (`Dockerfile`, `entrypoint.sh`, Chrome managed policies, theme assets) lives under [`vm-image/`](./vm-image) and is built automatically by the controller on first boot.
+
 ## Features
 
 - **Multi-VM** — many isolated Ubuntu desktops side by side, each in its own browser tab.
@@ -133,13 +135,18 @@ The SSE stream republishes Docker container events filtered to `label=cursor-vm.
 
 ## Driving from an AI agent (MCP)
 
-For agent-style usage (Claude Desktop, Claude Code, Cursor…), two MCP servers are wired up in [`.mcp.json`](./.mcp.json) (Claude Code) and [`.cursor/mcp.json`](./.cursor/mcp.json) (Cursor) — distinct purposes:
+For agent-style usage (Claude Desktop, Claude Code, Cursor…), two MCP servers are wired up — distinct purposes:
 
 - **`cursor-vm`** ([`apps/mcp-server/`](./apps/mcp-server)) — multi-VM lifecycle (`create_vm`, `delete_vm`, `reset_vm`, `list_vms`) plus per-VM desktop drive (`screenshot`, `click`, `shell`, `install_apt`, …). Every desktop tool takes an optional `vm_id`; if exactly one VM is running it's used by default.
 - **`chrome-devtools`** — Google's [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp). Get the right host CDP port by calling `cursor-vm.launch_chrome_debug({ vm_id })` first; the result includes `host_cdp_port` and `chrome_devtools_mcp_url`. Pass that URL to `chrome-devtools-mcp` via `--browserUrl=…`.
 
-> [!NOTE]
-> The MCP servers config is single-sourced in [`.mcp.json`](./.mcp.json). After editing it, run `node scripts/sync-mcp.mjs` to refresh [`.cursor/mcp.json`](./.cursor/mcp.json). Both files are committed and kept byte-identical.
+The MCP servers config is single-sourced in [`.mcp.json`](./.mcp.json) (canonical, read by Claude Code at the repo root). After editing it, run the sync script to refresh [`.cursor/mcp.json`](./.cursor/mcp.json) (read by Cursor):
+
+```bash
+node scripts/sync-mcp.mjs
+```
+
+Both files are committed and kept byte-identical, so a single edit in `.mcp.json` is enough.
 
 ### The install / uninstall / reset loop
 
@@ -160,15 +167,15 @@ All env vars are validated by Zod at boot. Set them in `apps/controller/.env.loc
 | ---------------------------------------- | ----------------------------- | ------------------------------------ |
 | `VM_IMAGE`                               | `cursor-style-vm:latest`      | Docker image used for every VM       |
 | `VM_REPO_DIR`                            | repo root (parent of `apps/`) | Build context for the image          |
-| `VM_MEMORY_MB`                           | `2048`                   | RAM cap per VM                       |
-| `VM_CPUS`                                | `2`                      | vCPU count per VM (fractions ok)     |
-| `VM_SHM_MB`                              | `2048`                   | `/dev/shm` size (Chrome benefits)    |
-| `VM_SCREEN_WIDTH` / `VM_SCREEN_HEIGHT`   | `1920` / `1080`          | Xvfb geometry                        |
-| `VM_VNC_PASSWORD`                        | `agent`                  | VNC password baked into the container |
-| `VM_PORT_API_BASE`                       | `18000`                  | First port of the API host pool      |
-| `VM_PORT_NOVNC_BASE`                     | `16080`                  | First port of the noVNC host pool    |
-| `VM_PORT_CDP_BASE`                       | `19222`                  | First port of the CDP host pool      |
-| `VM_MAX_CONCURRENT`                      | `8`                      | Hard cap on concurrent VMs           |
+| `VM_MEMORY_MB`                           | `2048`                        | RAM cap per VM                       |
+| `VM_CPUS`                                | `2`                           | vCPU count per VM (fractions ok)     |
+| `VM_SHM_MB`                              | `2048`                        | `/dev/shm` size (Chrome benefits)    |
+| `VM_SCREEN_WIDTH` / `VM_SCREEN_HEIGHT`   | `1920` / `1080`               | Xvfb geometry                        |
+| `VM_VNC_PASSWORD`                        | `agent`                       | VNC password baked into the container |
+| `VM_PORT_API_BASE`                       | `18000`                       | First port of the API host pool      |
+| `VM_PORT_NOVNC_BASE`                     | `16080`                       | First port of the noVNC host pool    |
+| `VM_PORT_CDP_BASE`                       | `19222`                       | First port of the CDP host pool      |
+| `VM_MAX_CONCURRENT`                      | `8`                           | Hard cap on concurrent VMs           |
 
 > [!CAUTION]
 > The default `VM_VNC_PASSWORD=agent` is for local-only loopback use. Change it before exposing the controller to anything beyond `127.0.0.1`.
@@ -198,11 +205,12 @@ vm/
 │   ├── controller/             Next.js controller (host) + UI
 │   │   ├── server.ts           Custom server: HTTP + noVNC WS proxy
 │   │   ├── package.json
+│   │   ├── public/onboarding/  5-step editorial onboarding assets
 │   │   └── src/
 │   │       ├── app/
 │   │       │   ├── page.tsx    Tabs shell over N VmConsoles
 │   │       │   └── api/
-│   │       │       ├── vms/... Lifecycle endpoints
+│   │       │       ├── vms/    Lifecycle endpoints
 │   │       │       ├── vm/[id]/ Per-VM HTTP proxy
 │   │       │       └── events/ SSE stream of Docker events
 │   │       ├── components/
@@ -222,11 +230,17 @@ vm/
 ├── automation/                 FastAPI server running inside each VM container
 │   ├── requirements.txt
 │   └── server.py
-├── Dockerfile                  VM image — built automatically by the controller
-├── entrypoint.sh
-├── .mcp.json                   MCP servers for Claude Code (project scope)
+├── vm-image/                   VM image — built automatically by the controller
+│   ├── Dockerfile
+│   ├── entrypoint.sh
+│   └── assets/
+│       ├── chrome/             Managed policies + first-run prefs
+│       └── theme/              XFCE / Plank / GTK theme bundle
+├── scripts/
+│   └── sync-mcp.mjs            Single-source MCP config sync
+├── .mcp.json                   MCP servers for Claude Code (canonical)
 └── .cursor/
-    ├── mcp.json                MCP servers for Cursor (project scope)
+    ├── mcp.json                MCP servers for Cursor (synced from .mcp.json)
     └── skills/
         └── vm-test-app-install/SKILL.md   Install/uninstall/delete loop skill
 ```
