@@ -1,6 +1,0 @@
-{
-  "enabledMcpjsonServers": [
-    "cursor-vm",
-    "chrome-devtools"
-  ]
-}
