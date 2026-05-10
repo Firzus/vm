@@ -137,7 +137,7 @@ function compile(
   if (!shader) return null;
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     console.error("[paper-shader] compile error:", gl.getShaderInfoLog(shader));
     gl.deleteShader(shader);
     return null;

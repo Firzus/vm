@@ -164,8 +164,8 @@ Uses **only `cursor-vm`** (chrome-devtools-mcp is unrelated):
 6. `cursor-vm.uninstall_apt({ vm_id, package: "opera-stable" })`
 7. `cursor-vm.delete_vm({ vm_id, wipe: true })` and start the next case
 
-A Claude Code skill that walks through this loop is provided at
-[`.claude/skills/vm-test-app-install/SKILL.md`](../.claude/skills/vm-test-app-install/SKILL.md).
+A Cursor skill that walks through this loop is provided at
+[`.cursor/skills/vm-test-app-install/SKILL.md`](../.cursor/skills/vm-test-app-install/SKILL.md).
 
 ## Smoke tests
 

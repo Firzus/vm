@@ -151,7 +151,7 @@ function OnboardingModal({
 
         {/* Step content. The whole step is keyed by index so animations and
             internal step-state reset cleanly between transitions. */}
-        <StepStage key={index} index={index} total={STEPS.length}>
+        <StepStage key={index}>
           {(() => {
             const Component = STEPS[index].Component;
             return (
@@ -236,19 +236,9 @@ function Stepper({
   );
 }
 
-function StepStage({
-  index,
-  total,
-  children,
-}: {
-  index: number;
-  total: number;
-  children: React.ReactNode;
-}) {
+function StepStage({ children }: { children: React.ReactNode }) {
   // Stagger every [data-reveal] element on mount.
   const ref = useGsapReveal<HTMLDivElement>({ stagger: 0.05, y: 12 });
-  void total;
-  void index;
   return (
     <div className="flex-1 overflow-y-auto">
       <div

@@ -42,7 +42,9 @@ export function VmConsole({ vm }: Props) {
   const root = useRef<HTMLDivElement>(null);
 
   // Ensure the boot-loader stays visible long enough to feel intentional even
-  // when the VM connects fast. Reset on reconnect.
+  // when the VM connects fast. Reset on reconnect. The initial reset is
+  // deferred out of the effect body to satisfy React 19's
+  // react-hooks/set-state-in-effect rule.
   useEffect(() => {
     let cancelled = false;
     queueMicrotask(() => {

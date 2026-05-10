@@ -38,6 +38,8 @@ export function BootLoader({
     if (!active) return;
     let cancelled = false;
     let i = 0;
+    // Defer the initial reset out of the effect body to satisfy React 19's
+    // react-hooks/set-state-in-effect rule.
     queueMicrotask(() => {
       if (!cancelled) setDone(0);
     });
