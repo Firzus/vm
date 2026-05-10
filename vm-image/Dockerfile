@@ -68,7 +68,7 @@ RUN install -d -m 0755 /etc/apt/keyrings \
 # privacy sandbox dialog, password manager prompts, etc. Lives outside /root
 # so it survives volume resets and is authoritative over user settings.
 RUN mkdir -p /etc/opt/chrome/policies/managed
-COPY chrome/policies/cursor-vm.json /etc/opt/chrome/policies/managed/cursor-vm.json
+COPY vm-image/assets/chrome/policies/cursor-vm.json /etc/opt/chrome/policies/managed/cursor-vm.json
 
 # Pre-seed the user profile with a First Run marker and minimal Local State so
 # Chrome skips its first-run UI even if the volume already has /root cached.
@@ -79,9 +79,9 @@ RUN mkdir -p /root/.config/google-chrome \
 
 # Pre-baked editorial-Swiss wallpaper (generated via the imagegen skill).
 RUN mkdir -p /usr/share/backgrounds/cursor-style
-COPY theme/wallpaper/cursor-paper.png /usr/share/backgrounds/cursor-style/cursor-paper.png
+COPY vm-image/assets/theme/wallpaper/cursor-paper.png /usr/share/backgrounds/cursor-style/cursor-paper.png
 
-COPY theme/build-theme.sh /tmp/build-theme.sh
+COPY vm-image/assets/theme/build-theme.sh /tmp/build-theme.sh
 RUN bash /tmp/build-theme.sh && rm /tmp/build-theme.sh
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -104,16 +104,16 @@ RUN mkdir -p /root/.vnc \
 
 RUN mkdir -p /root/Downloads /root/Desktop /root/.config/xfce4 /root/.config/plank/dock1/launchers
 
-COPY theme/xfconf /root/.config/xfce4/xfconf/xfce-perchannel-xml/
-COPY theme/plank/dock1/settings /root/.config/plank/dock1/settings
-COPY theme/plank/dock1/launchers/ /root/.config/plank/dock1/launchers/
+COPY vm-image/assets/theme/xfconf /root/.config/xfce4/xfconf/xfce-perchannel-xml/
+COPY vm-image/assets/theme/plank/dock1/settings /root/.config/plank/dock1/settings
+COPY vm-image/assets/theme/plank/dock1/launchers/ /root/.config/plank/dock1/launchers/
 
 # Stash the desktop config inside the image as well, so the entrypoint can
 # restore it onto a fresh /root volume (which is a named docker volume).
 RUN mkdir -p /etc/skel-vm \
     && cp -a /root/.config /etc/skel-vm/.config
 
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY vm-image/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 EXPOSE 5901 6080 8000
