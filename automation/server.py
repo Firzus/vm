@@ -13,13 +13,22 @@ import shlex
 import subprocess
 from typing import Literal, Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 DISPLAY = os.environ.get("DISPLAY", ":1")
 ENV = {**os.environ, "DISPLAY": DISPLAY}
 
+# We disable the bundled docs pages and re-serve them ourselves so the
+# embedded Swagger UI / ReDoc shell can point at a proxy-aware
+# ``openapi_url``. The controller forwards the original path prefix as
+# ``X-Forwarded-Prefix`` (e.g. ``/api/vm/<id>``); when present, the docs HTML
+# loads its spec from ``<prefix>/openapi.json`` instead of the page-origin
+# ``/openapi.json`` (which, behind the proxy, is the controller and would
+# 404). The default ``/openapi.json`` route is left intact and is reachable
+# through the same proxy.
 app = FastAPI(
     title="Cursor-style VM Automation API",
     version="1.0.0",
@@ -27,7 +36,37 @@ app = FastAPI(
         "Drive the XFCE desktop running inside this container. "
         "Endpoints mirror the action set used by computer-use agents."
     ),
+    docs_url=None,
+    redoc_url=None,
 )
+
+
+def _forwarded_prefix(request: Request) -> str:
+    """Return the path prefix the proxy used to reach us, without a trailing slash.
+
+    Falls back to an empty string when the header is absent (i.e. the API is
+    being hit directly, not via the controller proxy).
+    """
+    raw = request.headers.get("x-forwarded-prefix", "")
+    return raw.rstrip("/")
+
+
+@app.get("/docs", include_in_schema=False)
+def swagger_ui(request: Request) -> HTMLResponse:
+    prefix = _forwarded_prefix(request)
+    return get_swagger_ui_html(
+        openapi_url=f"{prefix}{app.openapi_url}",
+        title=f"{app.title} – Swagger UI",
+    )
+
+
+@app.get("/redoc", include_in_schema=False)
+def redoc_ui(request: Request) -> HTMLResponse:
+    prefix = _forwarded_prefix(request)
+    return get_redoc_html(
+        openapi_url=f"{prefix}{app.openapi_url}",
+        title=f"{app.title} – ReDoc",
+    )
 
 
 def run(cmd: list[str], *, timeout: float = 15.0, capture: bool = True) -> subprocess.CompletedProcess[str]:

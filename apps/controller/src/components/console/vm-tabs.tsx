@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { Plus, Trash2, RotateCw, Loader2, AlertTriangle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -11,6 +11,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { VmConsole } from "@/components/console/vm-console";
 import { useVms, createVm, deleteVm, resetVm } from "@/lib/useVms";
 import { openOnboarding } from "@/lib/use-onboarding";
@@ -19,9 +30,20 @@ import { cn } from "@/lib/utils";
 
 const ACTIVE_PARAM = "vm";
 
+type PendingAction = "deleting" | "resetting";
+
 export function VmTabs() {
   const { vms, error, isLoading, mutate } = useVms();
-  const [pending, startTransition] = useTransition();
+  const [creating, startCreateTransition] = useTransition();
+  // Per-VM in-flight action. Tracked here (rather than in <VmTabActions>) so
+  // the parent can drive the optimistic SWR update + rollback on delete and
+  // surface a single inline error notice scoped to the failing VM.
+  const [pendingActions, setPendingActions] = useState<
+    Record<string, PendingAction | undefined>
+  >({});
+  const [actionError, setActionError] = useState<
+    { id: string; message: string } | null
+  >(null);
   const router = useRouter();
   const search = useSearchParams();
 
@@ -45,36 +67,89 @@ export function VmTabs() {
     router.replace(`/?${next.toString()}`, { scroll: false });
   };
 
+  const setPending = (id: string, action: PendingAction | undefined) => {
+    setPendingActions((prev) => {
+      if (action === undefined) {
+        if (prev[id] === undefined) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      }
+      if (prev[id] === action) return prev;
+      return { ...prev, [id]: action };
+    });
+  };
+
+  // Auto-dismiss the inline error after a few seconds so it doesn't linger.
+  useEffect(() => {
+    if (!actionError) return;
+    const id = window.setTimeout(() => setActionError(null), 5000);
+    return () => window.clearTimeout(id);
+  }, [actionError]);
+
   const onCreate = () => {
-    startTransition(async () => {
+    startCreateTransition(async () => {
       try {
         const vm = await createVm({}, mutate);
         setActive(vm.id);
       } catch (err) {
         console.error("[ui] createVm failed:", err);
+        setActionError({
+          id: "__create__",
+          message: err instanceof Error ? err.message : "Failed to create VM",
+        });
       }
     });
   };
 
-  const onDelete = (id: string) => {
-    startTransition(async () => {
-      try {
-        await deleteVm(id, { wipe: true }, mutate);
-      } catch (err) {
-        console.error("[ui] deleteVm failed:", err);
-      }
-    });
+  const onDelete = async (id: string) => {
+    setPending(id, "deleting");
+    setActionError((prev) => (prev?.id === id ? null : prev));
+    // Optimistically drop the VM from the SWR cache so the tab transitions
+    // out immediately. We still revalidate after the request settles so the
+    // SSE Docker event can't leave the cache out of sync.
+    try {
+      await mutate(
+        async () => {
+          await deleteVm(id, { wipe: true });
+          return undefined;
+        },
+        {
+          optimisticData: (current) =>
+            current
+              ? { vms: current.vms.filter((v) => v.id !== id) }
+              : { vms: [] },
+          rollbackOnError: true,
+          populateCache: false,
+          revalidate: true,
+        },
+      );
+    } catch (err) {
+      console.error("[ui] deleteVm failed:", err);
+      setActionError({
+        id,
+        message: err instanceof Error ? err.message : "Failed to delete VM",
+      });
+    } finally {
+      setPending(id, undefined);
+    }
   };
 
-  const onReset = (id: string) => {
-    startTransition(async () => {
-      try {
-        const vm = await resetVm(id, { wipe: true }, mutate);
-        setActive(vm.id);
-      } catch (err) {
-        console.error("[ui] resetVm failed:", err);
-      }
-    });
+  const onReset = async (id: string) => {
+    setPending(id, "resetting");
+    setActionError((prev) => (prev?.id === id ? null : prev));
+    try {
+      const vm = await resetVm(id, { wipe: true }, mutate);
+      setActive(vm.id);
+    } catch (err) {
+      console.error("[ui] resetVm failed:", err);
+      setActionError({
+        id,
+        message: err instanceof Error ? err.message : "Failed to reset VM",
+      });
+    } finally {
+      setPending(id, undefined);
+    }
   };
 
   if (isLoading && vms.length === 0) {
@@ -94,7 +169,7 @@ export function VmTabs() {
   }
 
   if (vms.length === 0) {
-    return <EmptyState onCreate={onCreate} pending={pending} />;
+    return <EmptyState onCreate={onCreate} pending={creating} />;
   }
 
   return (
@@ -109,20 +184,28 @@ export function VmTabs() {
         </span>
         <span aria-hidden className="hidden h-3 w-px bg-rule md:inline-block" />
 
-        <div className="scroll-fade-x flex-1 overflow-x-auto">
+        {/*
+          Horizontal-only scroll. CSS forces overflow-y:auto when overflow-x is
+          auto, which would let the strip scroll vertically — and the active
+          TabsTrigger underline (an absolute ::after at -bottom-[7px]) is just
+          enough overflow to trigger it. We pin overflow-y to hidden, then
+          reserve room for the underline with pb-2 and cancel the extra height
+          with -mb-2 so the surrounding header layout is unchanged.
+        */}
+        <div className="scroll-fade-x -mb-2 flex-1 overflow-x-auto overflow-y-hidden pb-2">
           <TabsList variant="line" className="flex w-max items-center gap-3 pr-2">
             {vms.map((vm, idx) => (
               <div
                 key={vm.id}
-                className="group relative flex shrink-0 items-center"
+                className="group relative flex shrink-0 items-center rounded-[2px] data-[active=true]:bg-paper-2"
                 data-active={activeId === vm.id ? "true" : undefined}
               >
                 <TabsTrigger
                   value={vm.id}
-                  className="flex items-center gap-2 pr-1.5"
+                  className="group/trigger flex items-center gap-2 rounded-[2px] pl-1.5 pr-1.5"
                 >
-                  {/* Editorial numeral. */}
-                  <span className="font-mono text-[10px] tracking-[0.14em] text-ink-muted">
+                  {/* Editorial numeral — vermilion when active. */}
+                  <span className="font-mono text-[10px] tracking-[0.14em] text-ink-muted transition-colors group-data-[state=active]/trigger:text-vermilion">
                     {String(idx + 1).padStart(2, "0")}
                   </span>
                   <span
@@ -137,7 +220,7 @@ export function VmTabs() {
                         "bg-ink-muted",
                     )}
                   />
-                  <span className="font-mono text-[12px] text-ink">
+                  <span className="font-mono text-[12px] text-ink-muted transition-colors group-hover/trigger:text-ink group-data-[state=active]/trigger:font-semibold group-data-[state=active]/trigger:text-ink">
                     {vm.label || vm.name}
                   </span>
                 </TabsTrigger>
@@ -145,7 +228,7 @@ export function VmTabs() {
                   vm={vm}
                   onDelete={onDelete}
                   onReset={onReset}
-                  pending={pending}
+                  pendingAction={pendingActions[vm.id]}
                 />
               </div>
             ))}
@@ -159,10 +242,14 @@ export function VmTabs() {
                 size="sm"
                 variant="ghost"
                 onClick={onCreate}
-                disabled={pending}
+                disabled={creating}
                 className="h-8 gap-1.5 text-[12px]"
               >
-                <Plus className="size-3.5" />
+                {creating ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
                 New VM
               </Button>
             </TooltipTrigger>
@@ -172,6 +259,23 @@ export function VmTabs() {
           </Tooltip>
         </div>
       </div>
+
+      {actionError && (
+        <div className="border-b border-vermilion/30 bg-vermilion/5 px-4 py-1.5">
+          <div className="flex items-center gap-2 font-mono text-[11px] text-vermilion">
+            <AlertTriangle className="size-3" />
+            <span className="truncate">{actionError.message}</span>
+            <button
+              type="button"
+              onClick={() => setActionError(null)}
+              className="ml-auto rounded-[2px] px-1.5 py-0.5 text-[10px] uppercase tracking-[0.14em] text-vermilion/80 transition hover:text-vermilion"
+              aria-label="Dismiss error"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {vms.map((vm) => (
         <TabsContent
@@ -191,54 +295,120 @@ function VmTabActions({
   vm,
   onDelete,
   onReset,
-  pending,
+  pendingAction,
 }: {
   vm: Vm;
   onDelete: (id: string) => void;
   onReset: (id: string) => void;
-  pending: boolean;
+  pendingAction: PendingAction | undefined;
 }) {
-  return (
-    <div className="-ml-1 flex items-center pr-1.5 opacity-0 transition group-hover:opacity-100 group-data-[active=true]:opacity-70 group-data-[active=true]:hover:opacity-100">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label="Reset VM"
-            disabled={pending}
-            onClick={() => {
-              const ok = window.confirm(
-                `Reset VM "${vm.label || vm.name}"?\n\nDestroys + recreates the container with a fresh /root volume. Use this to start over from the image baseline.`,
-              );
-              if (ok) onReset(vm.id);
-            }}
-            className="grid size-6 place-items-center rounded-[2px] text-ink-muted hover:text-ink"
-          >
-            <RotateCw className="size-3" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Reset (wipe + recreate)</TooltipContent>
-      </Tooltip>
+  const isDeleting = pendingAction === "deleting";
+  const isResetting = pendingAction === "resetting";
+  // Any in-flight destructive action on this tab disables both buttons so the
+  // user can't queue a Reset while a Delete is finishing (or vice versa).
+  const busy = isDeleting || isResetting;
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label="Delete VM"
-            disabled={pending}
-            onClick={() => {
-              const ok = window.confirm(
-                `Delete VM "${vm.label || vm.name}"?\n\nThis stops the container and removes its persistent /root volume. Anything installed (apps, profiles, downloads) is destroyed. Other VMs are unaffected.`,
-              );
-              if (ok) onDelete(vm.id);
-            }}
-            className="grid size-6 place-items-center rounded-[2px] text-ink-muted hover:text-vermilion"
-          >
-            <Trash2 className="size-3" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">Delete (wipes volume)</TooltipContent>
-      </Tooltip>
+  return (
+    <div
+      // While an action is in-flight, force the actions visible — the spinner
+      // shouldn't disappear just because the cursor leaves the tab.
+      data-busy={busy ? "true" : undefined}
+      className="-ml-1 flex items-center pr-1.5 opacity-0 transition group-hover:opacity-100 group-data-[active=true]:opacity-70 group-data-[active=true]:hover:opacity-100 data-[busy=true]:opacity-100"
+    >
+      <AlertDialog>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                aria-label={isResetting ? "Resetting VM…" : "Reset VM"}
+                aria-busy={isResetting || undefined}
+                disabled={busy}
+                className="grid size-6 place-items-center rounded-[2px] text-ink-muted hover:text-ink disabled:cursor-default disabled:opacity-70 disabled:hover:text-ink-muted"
+              >
+                {isResetting ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <RotateCw className="size-3" />
+                )}
+              </button>
+            </AlertDialogTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {isResetting ? "Resetting…" : "Reset (wipe + recreate)"}
+          </TooltipContent>
+        </Tooltip>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Reset VM &ldquo;{vm.label || vm.name}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Destroys + recreates the container with a fresh /root volume. Use
+              this to start over from the image baseline.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => onReset(vm.id)}
+            >
+              Reset VM
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <AlertDialogTrigger asChild>
+              <button
+                type="button"
+                aria-label={isDeleting ? "Deleting VM…" : "Delete VM"}
+                aria-busy={isDeleting || undefined}
+                disabled={busy}
+                className={cn(
+                  "grid size-6 place-items-center rounded-[2px] text-ink-muted hover:text-vermilion disabled:cursor-default disabled:hover:text-ink-muted",
+                  isDeleting && "text-vermilion disabled:text-vermilion",
+                  busy && !isDeleting && "disabled:opacity-70",
+                )}
+              >
+                {isDeleting ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Trash2 className="size-3" />
+                )}
+              </button>
+            </AlertDialogTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {isDeleting ? "Deleting…" : "Delete (wipes volume)"}
+          </TooltipContent>
+        </Tooltip>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Delete VM &ldquo;{vm.label || vm.name}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This stops the container and removes its persistent /root volume.
+              Anything installed (apps, profiles, downloads) is destroyed. Other
+              VMs are unaffected.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => onDelete(vm.id)}
+            >
+              Delete VM
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

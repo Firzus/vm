@@ -16,6 +16,13 @@ const VncViewer = dynamic(
   { ssr: false },
 );
 
+// Pre-ready auto-retry budget. ~8 attempts × 1.5s ≈ 12s of grace, which
+// comfortably covers a cold container booting Xvfb + XFCE + x11vnc +
+// websockify on a typical laptop. Past that, we surface a real error so
+// the user can retry manually if the VM is genuinely stuck.
+const MAX_AUTO_ATTEMPTS = 8;
+const AUTO_RETRY_DELAY_MS = 1500;
+
 type Props = {
   vm: Vm;
 };
@@ -39,6 +46,14 @@ export function VmConsole({ vm }: Props) {
   const [shellOpen, setShellOpen] = useState(false);
   const [bootMinElapsed, setBootMinElapsed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  // Tracks whether RFB has ever reached "connected" since the last manual
+  // reconnect. Used to distinguish a genuine post-ready disconnect (real
+  // error worth surfacing) from a fresh container that simply isn't ready
+  // to serve websockify yet.
+  const [hasEverConnected, setHasEverConnected] = useState(false);
+  // Counts auto-retries while we're still in the pre-ready boot window.
+  // Capped to eventually surface a real error if the VM never comes up.
+  const [autoAttempts, setAutoAttempts] = useState(0);
   const root = useRef<HTMLDivElement>(null);
 
   // Ensure the boot-loader stays visible long enough to feel intentional even
@@ -101,9 +116,30 @@ export function VmConsole({ vm }: Props) {
   const handleStatus = useCallback((s: VncStatus, msg?: string) => {
     setStatus(s);
     setStatusMsg(msg ?? null);
+    if (s === "connected") setHasEverConnected(true);
   }, []);
 
-  const onReconnect = useCallback(() => setReconnectKey((k) => k + 1), []);
+  const onReconnect = useCallback(() => {
+    setHasEverConnected(false);
+    setAutoAttempts(0);
+    setReconnectKey((k) => k + 1);
+  }, []);
+
+  // Pre-ready VM: websockify isn't always listening the moment the
+  // container starts (Xvfb → XFCE → x11vnc → websockify is sequential in
+  // entrypoint.sh). The first few RFB disconnects therefore aren't
+  // failures — they're just "VM still booting". Silently re-mount the
+  // viewer until either it connects or we exhaust the budget.
+  useEffect(() => {
+    if (status !== "error" && status !== "disconnected") return;
+    if (hasEverConnected) return;
+    if (autoAttempts >= MAX_AUTO_ATTEMPTS) return;
+    const id = window.setTimeout(() => {
+      setAutoAttempts((n) => n + 1);
+      setReconnectKey((k) => k + 1);
+    }, AUTO_RETRY_DELAY_MS);
+    return () => window.clearTimeout(id);
+  }, [status, hasEverConnected, autoAttempts]);
 
   const onScreenshot = useCallback(() => {
     const a = document.createElement("a");
@@ -160,12 +196,21 @@ export function VmConsole({ vm }: Props) {
     status === "error" ||
     status === "disconnected";
 
-  const errorMsg =
-    status === "error"
+  // Only treat a failure as a hard error once the VM has either:
+  //   (a) been live at least once this session (post-ready disconnect), or
+  //   (b) blown through the silent pre-ready auto-retry budget.
+  // Until then, the boot loader's normal progressive checklist tells the
+  // story — a red "Connection failed" block during a normal cold boot is
+  // misleading, since nothing is actually broken.
+  const isHardFailure =
+    (status === "error" || status === "disconnected") &&
+    (hasEverConnected || autoAttempts >= MAX_AUTO_ATTEMPTS);
+
+  const errorMsg = isHardFailure
+    ? status === "error"
       ? statusMsg ?? "Connection error"
-      : status === "disconnected" && bootMinElapsed
-        ? statusMsg ?? "Disconnected"
-        : null;
+      : statusMsg ?? "Disconnected"
+    : null;
 
   return (
     <main

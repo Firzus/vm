@@ -1,0 +1,54 @@
+### Commentary
+##
+## Equivs control file for `qt5-noble-compat`.
+##
+## Many real-world `.deb` packages (Opera, Opera GX, Electron-based apps,
+## anything built against pre-Noble Qt5) hard-depend on the legacy library
+## names: `libqt5core5a`, `libqt5gui5`, `libqt5widgets5`, `libqt5gui5-gles`.
+##
+## Ubuntu 24.04 (Noble) renamed those packages as part of the time_t-64
+## (`t64`) ABI transition: the actual `.so` files are unchanged, only the
+## binary package names moved to `libqt5core5t64`, `libqt5gui5t64`,
+## `libqt5widgets5t64`. Without a compat shim, vendor `.deb` packages fail
+## with messages like:
+##
+##     opera-gx-stable : Depends: libqt5core5a (>= 5.3.0) but it is not installable
+##
+## and `apt-get install -f` does NOT recover (because the legacy package
+## names just don't exist on Noble anymore — apt has nothing to install).
+##
+## This shim package satisfies those legacy dependency strings via
+## `Provides:`, while pulling in the real Noble `t64` packages via
+## `Depends:`. With it preinstalled, `apt-get install ./vendor.deb`
+## resolves cleanly without `--force-depends`.
+##
+## Built into the image with:
+##     equivs-build qt5-noble-compat.equivs
+##
+## See https://wiki.debian.org/ReleaseGoals/64bit-time for the t64 background.
+
+Section: misc
+Priority: optional
+Standards-Version: 4.6.2
+
+Package: qt5-noble-compat
+Version: 1.0
+Maintainer: cursor-style-vm <noreply@local>
+Architecture: all
+Depends: libqt5core5t64, libqt5gui5t64, libqt5widgets5t64
+## Provides versions must beat the Noble `Breaks: libqt5core5a (< 5.15.13+dfsg-1ubuntu1)`
+## relationships declared by libqt5{core5,gui5,widgets5}t64. We bump to an epoch-prefixed
+## version (`99:`) so that any vendor .deb requesting `libqt5core5a (>= X.Y)` resolves
+## cleanly against the shim while dpkg still sees the relationship as "newer than the
+## Breaks bound", avoiding the install-time conflict.
+## NB: we deliberately do NOT Provides `libqt5gui5-gles` — `libqt5gui5t64`
+## declares `Conflicts: libqt5gui5-gles`, so providing it would block the install.
+## Vendor packages that ask for `libqt5gui5 | libqt5gui5-gles` (e.g. Opera GX)
+## resolve the alternative against the `libqt5gui5` we do Provide.
+Provides: libqt5core5a (= 99:5.15.13+dfsg-1ubuntu1), libqt5gui5 (= 99:5.15.13+dfsg-1ubuntu1), libqt5widgets5 (= 99:5.15.13+dfsg-1ubuntu1)
+Description: Compat shim mapping legacy Qt5 names to Noble t64 packages
+ Provides the pre-Noble Qt5 binary package names (libqt5core5a, libqt5gui5,
+ libqt5gui5-gles, libqt5widgets5) as virtual packages backed by the renamed
+ Ubuntu 24.04 `t64` packages. Lets vendor `.deb` files (Opera GX, Opera,
+ some Electron apps) install with `apt-get install ./pkg.deb` instead of
+ needing `dpkg -i --force-depends`.

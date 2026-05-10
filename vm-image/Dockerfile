@@ -1,4 +1,40 @@
 # syntax=docker/dockerfile:1.6
+
+# ---------------------------------------------------------------------------
+# Stage 1 — qt5-noble-compat shim builder
+#
+# Ubuntu 24.04 (Noble) renamed the Qt5 runtime packages as part of the
+# time_t-64 (`t64`) ABI transition: `libqt5core5a` -> `libqt5core5t64`,
+# `libqt5gui5` -> `libqt5gui5t64`, `libqt5widgets5` -> `libqt5widgets5t64`,
+# etc. The actual .so files are unchanged but the binary package names
+# moved, so any vendor .deb that hard-depends on the legacy names (Opera,
+# Opera GX, several Electron apps, anything built pre-Noble against Qt5)
+# fails with `libqt5core5a … not installable` and `apt-get install -f`
+# does NOT recover.
+#
+# This builder stage uses `equivs` to produce a tiny meta-package
+# `qt5-noble-compat_1.0_all.deb` that:
+#   - `Provides:` the legacy names (libqt5core5a, libqt5gui5,
+#     libqt5gui5-gles, libqt5widgets5) so vendor deps resolve, and
+#   - `Depends:` on the real Noble `t64` packages so the actual libraries
+#     are pulled in at install time.
+#
+# The .deb is copied into the runtime image below; `equivs` itself is
+# NOT installed in the runtime image.
+# ---------------------------------------------------------------------------
+FROM ubuntu:24.04 AS qt5-compat-builder
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends equivs \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY vm-image/assets/qt5-compat/qt5-noble-compat.equivs /build/qt5-noble-compat.equivs
+RUN equivs-build /build/qt5-noble-compat.equivs \
+    && test -f /build/qt5-noble-compat_1.0_all.deb
+
+# ---------------------------------------------------------------------------
+# Stage 2 — runtime VM image (Ubuntu 24.04 + XFCE + Chrome + automation)
+# ---------------------------------------------------------------------------
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -36,6 +72,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         xfonts-base xfonts-100dpi xfonts-75dpi \
         fonts-noto fonts-noto-color-emoji fonts-liberation fonts-inter fonts-jetbrains-mono \
         arc-theme papirus-icon-theme \
+    && rm -rf /var/lib/apt/lists/*
+
+# ---------------------------------------------------------------------------
+# Qt5 / Noble t64 compatibility
+#
+# Ubuntu 24.04 renamed the Qt5 runtime packages (`libqt5core5a` ->
+# `libqt5core5t64`, `libqt5gui5` -> `libqt5gui5t64`, etc.) for the time_t-64
+# ABI transition. Vendor `.deb` files (Opera, Opera GX, several Electron
+# apps) still hard-depend on the legacy names, which would otherwise fail
+# with `libqt5core5a … not installable` on this image.
+#
+# Two things happen here:
+#   1. Preinstall the real Noble `t64` Qt5 runtimes — the actual `.so`
+#      files everything ends up loading at runtime.
+#   2. Install the `qt5-noble-compat` shim (.deb built in the
+#      `qt5-compat-builder` stage above). It `Provides:` the legacy package
+#      names so `apt-get install ./vendor.deb` resolves cleanly, with no
+#      need for `dpkg -i --force-depends`.
+#
+# Note: this layer still removes /var/lib/apt/lists/* per the image-wide
+# policy, so the in-VM `apt install …` workflow still requires an
+# `apt-get update` first.
+# ---------------------------------------------------------------------------
+COPY --from=qt5-compat-builder /build/qt5-noble-compat_1.0_all.deb /tmp/qt5-noble-compat_1.0_all.deb
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libqt5core5t64 libqt5gui5t64 libqt5widgets5t64 \
+        /tmp/qt5-noble-compat_1.0_all.deb \
+    && rm -f /tmp/qt5-noble-compat_1.0_all.deb \
     && rm -rf /var/lib/apt/lists/*
 
 ARG BIBATA_VERSION=2.0.7

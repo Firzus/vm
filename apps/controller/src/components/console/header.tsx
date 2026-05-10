@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ExternalLink, BookText, HelpCircle } from "lucide-react";
+import { BookText, HelpCircle } from "lucide-react";
 import { StatusGlyph } from "./status";
 import {
   Tooltip,
@@ -23,7 +23,7 @@ type Props = {
  * Editorial masthead. Layout from left to right:
  *
  *   [Imprint logo]  VM Console  /  vm-label  ·  api:… vnc:… cdp:…
- *                                                    [status] · [time] [?] [docs] [↗]
+ *                                                    [status] · [time] [?] [docs]
  *
  * Hidden on small viewports below md: only the imprint, label, and status
  * survive — folio details (ports, time, secondary actions) come back at md+.
@@ -119,22 +119,6 @@ export function ConsoleHeader({ vm, status, size }: Props) {
               </a>
             </TooltipTrigger>
             <TooltipContent side="bottom">VM API documentation</TooltipContent>
-          </Tooltip>
-        )}
-        {vm && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <a
-                href={`http://127.0.0.1:${vm.ports.novnc}/vnc.html?autoconnect=1&password=agent`}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Open raw noVNC for this VM"
-                className="hidden size-7 place-items-center rounded-[2px] text-ink-muted transition hover:text-vermilion sm:grid"
-              >
-                <ExternalLink className="size-3.5" />
-              </a>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Raw noVNC client</TooltipContent>
           </Tooltip>
         )}
       </div>
