@@ -138,6 +138,9 @@ For agent-style usage (Claude Desktop, Claude Code, Cursor…), two MCP servers 
 - **`cursor-vm`** ([`apps/mcp-server/`](./apps/mcp-server)) — multi-VM lifecycle (`create_vm`, `delete_vm`, `reset_vm`, `list_vms`) plus per-VM desktop drive (`screenshot`, `click`, `shell`, `install_apt`, …). Every desktop tool takes an optional `vm_id`; if exactly one VM is running it's used by default.
 - **`chrome-devtools`** — Google's [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp). Get the right host CDP port by calling `cursor-vm.launch_chrome_debug({ vm_id })` first; the result includes `host_cdp_port` and `chrome_devtools_mcp_url`. Pass that URL to `chrome-devtools-mcp` via `--browserUrl=…`.
 
+> [!NOTE]
+> The MCP servers config is single-sourced in [`.mcp.json`](./.mcp.json). After editing it, run `node scripts/sync-mcp.mjs` to refresh [`.cursor/mcp.json`](./.cursor/mcp.json). Both files are committed and kept byte-identical.
+
 ### The install / uninstall / reset loop
 
 Uses **only `cursor-vm`**:
