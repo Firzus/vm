@@ -1,0 +1,14 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Cursor screen captures (ignorés par AGENTS.md search rules, à formaliser)
+.cursor/screens/
+
+# Local-only Claude Code state
+.claude/settings.local.json
