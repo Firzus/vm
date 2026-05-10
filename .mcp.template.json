@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "cursor-vm": {
+      "command": "${PYTHON}",
+      "args": ["${REPO_ROOT}/apps/mcp-server/server.py"],
+      "env": {
+        "CONTROLLER_URL": "http://localhost:3000"
+      }
+    },
+    "chrome-devtools": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--logFile=${REPO_ROOT}/apps/mcp-server/.cdm-mcp.log"
+      ],
+      "env": {
+        "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS": "1",
+        "CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS": "1"
+      }
+    }
+  }
+}
