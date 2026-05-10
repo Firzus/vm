@@ -28,14 +28,15 @@ async function imageExists(tag: string): Promise<boolean> {
 async function listBuildContextFiles(repoDir: string): Promise<string[]> {
   // Conservative whitelist: only files actually referenced by the Dockerfile.
   // Listing too broadly (e.g. node_modules of the controller) makes the
-  // dockerode buildImage upload slow and pointless.
+  // dockerode buildImage upload slow and pointless. Paths are repo-root
+  // relative; the Dockerfile now lives under vm-image/ but the build context
+  // remains the repo root so automation/ stays reachable.
   const candidates = [
-    "Dockerfile",
+    "vm-image/Dockerfile",
     ".dockerignore",
-    "entrypoint.sh",
+    "vm-image/entrypoint.sh",
+    "vm-image/assets",
     "automation",
-    "theme",
-    "chrome",
   ];
   const out: string[] = [];
   for (const c of candidates) {
@@ -68,12 +69,13 @@ async function* walk(dir: string, base: string): AsyncGenerator<string> {
 async function build(rebuild = false): Promise<void> {
   const tag = env.VM_IMAGE;
   const repoDir = env.VM_REPO_DIR!;
-  const dockerfile = path.join(repoDir, "Dockerfile");
+  const dockerfile = path.join(repoDir, "vm-image", "Dockerfile");
   try {
     await fs.access(dockerfile);
   } catch {
     throw new Error(
-      `VM Dockerfile not found at ${dockerfile}. Set VM_REPO_DIR to the repo root.`,
+      `VM Dockerfile not found at ${dockerfile}. ` +
+        "Set VM_REPO_DIR to the repo root (the directory that contains vm-image/Dockerfile).",
     );
   }
 
@@ -83,9 +85,11 @@ async function build(rebuild = false): Promise<void> {
   console.log(`[image] building ${tag} from ${repoDir} ...`);
 
   const src = await listBuildContextFiles(repoDir);
+  // The build context remains the repo root so automation/ keeps resolving;
+  // dockerfile is the repo-root-relative path to the Dockerfile inside it.
   const stream = await getDocker().buildImage(
     { context: repoDir, src },
-    { t: tag, nocache: rebuild },
+    { t: tag, nocache: rebuild, dockerfile: "vm-image/Dockerfile" },
   );
 
   await new Promise<void>((resolve, reject) => {
