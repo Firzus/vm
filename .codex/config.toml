@@ -1,0 +1,20 @@
+[mcp_servers.chrome-devtools]
+args = [
+    "/c",
+    "npx",
+    "-y",
+    "chrome-devtools-mcp@latest",
+    "--logFile=c:/Users/User/Documents/repository/vm/apps/mcp-server/.cdm-mcp.log",
+]
+command = "cmd"
+
+[mcp_servers.chrome-devtools.env]
+CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS = "1"
+CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS = "1"
+
+[mcp_servers.cursor-vm]
+args = ["c:/Users/User/Documents/repository/vm/apps/mcp-server/server.py"]
+command = "c:/Users/User/Documents/repository/vm/apps/mcp-server/.venv/Scripts/python.exe"
+
+[mcp_servers.cursor-vm.env]
+CONTROLLER_URL = "http://localhost:3000"
