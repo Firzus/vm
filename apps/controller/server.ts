@@ -18,6 +18,8 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
+import { createConnection } from "node:net";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { parse } from "node:url";
 import next from "next";
 // Import order matters: env validation runs first, then dockerode lazy-init.
@@ -48,6 +50,102 @@ const NOVNC_RE = /^\/api\/vm\/([a-zA-Z0-9-]+)\/novnc(?:\/.*)?$/;
  * websockify legitimately sends).
  */
 import type { Socket } from "node:net";
+
+/**
+ * Probe a loopback TCP port once. Resolves true if a connection completes
+ * within `timeoutMs`, false on any error/timeout. Always cleans up the
+ * probe socket so we never leak FDs.
+ *
+ * We use an explicit `setTimeout` rather than `socket.setTimeout` because
+ * the latter is an *idle* timeout — it doesn't fire while a SYN is still
+ * pending, so a dropped SYN could keep the socket alive for the OS-level
+ * connect timeout (tens of seconds on Windows) and queue up extra probes.
+ */
+function probeTcp(
+  host: string,
+  port: number,
+  timeoutMs: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const sock = createConnection({ host, port });
+    sock.unref(); // never keep the event loop alive for a probe
+
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      // Detach all listeners before destroying so a late `error` event from
+      // the kernel (e.g. ECONNREFUSED arriving after we resolved) cannot
+      // bubble up as an `uncaughtException`.
+      sock.removeAllListeners();
+      try {
+        sock.destroy();
+      } catch {
+        /* ignore */
+      }
+      resolve(ok);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    sock.once("connect", () => finish(true));
+    sock.once("error", () => finish(false));
+    sock.once("close", () => finish(false));
+  });
+}
+
+/**
+ * Wait until the upstream websockify port is accepting connections, or until
+ * we hit the deadline / the client gives up. This lets us keep the browser's
+ * WebSocket in `connecting` during the early-boot window (Xvfb → XFCE →
+ * x11vnc → websockify is sequential in entrypoint.sh) instead of accepting
+ * the upgrade and immediately closing it — which causes `@novnc/novnc` to
+ * `console.error` a noisy `Connection closed (code: 1006)` for every cold
+ * boot. The first probe succeeds instantly once websockify is already up,
+ * so warm reconnects pay no measurable cost.
+ *
+ * Returns "ready" on success, "client_gone" if the browser disconnected
+ * while waiting (no need to surface anything), or "timeout" if the upstream
+ * never came up within the budget (let the upgrade fail normally so the UI
+ * can surface a real error).
+ */
+async function waitForUpstreamReady(
+  host: string,
+  port: number,
+  clientSocket: Socket,
+): Promise<"ready" | "client_gone" | "timeout"> {
+  const deadline = Date.now() + 15_000;
+  const probeTimeoutMs = 500;
+  const retryDelayMs = 300;
+  let attempts = 0;
+  let logged = false;
+
+  while (Date.now() < deadline) {
+    if (clientSocket.destroyed) return "client_gone";
+    const ok = await probeTcp(host, port, probeTimeoutMs);
+    if (ok) {
+      if (logged) {
+        console.log(
+          `[ws-bridge] upstream ${host}:${port} ready after ${attempts + 1} probe(s)`,
+        );
+      }
+      return "ready";
+    }
+    attempts += 1;
+    if (!logged) {
+      // Single info line per pending connection — the browser is in the
+      // pre-ready window, so this is expected for the first few seconds
+      // after a fresh `POST /api/vms`.
+      console.log(
+        `[ws-bridge] upstream ${host}:${port} not ready yet, holding upgrade…`,
+      );
+      logged = true;
+    }
+    await new Promise<void>((r) => setTimeout(r, retryDelayMs));
+  }
+  return "timeout";
+}
 
 function pumpUpgrade(
   clientReq: IncomingMessage,
@@ -102,13 +200,16 @@ function pumpUpgrade(
     }
   });
 
-  // Surface unexpected client-side socket errors; benign close events are
-  // routed through the cleanup chain below once the bridge is live.
-  clientSocket.on("error", (err: Error) =>
-    console.error("[ws-bridge] client socket error:", err.message),
-  );
+  // Surface unexpected client-side socket errors that fire *before* the
+  // upstream upgrade completes; once the bridge is live, the cleanup chain
+  // installed inside the `upgrade` handler takes over (and removes this one
+  // to avoid double-logging).
+  const preBridgeClientError = (err: Error) =>
+    console.error("[ws-bridge] client socket error:", err.message);
+  clientSocket.on("error", preBridgeClientError);
 
   upstreamReq.on("upgrade", (upstreamRes, upstreamSocket, upstreamHead) => {
+    clientSocket.off("error", preBridgeClientError);
     if (clientSocket.destroyed) {
       console.warn(
         "[ws-bridge] client already destroyed at upgrade time; aborting",
@@ -137,8 +238,21 @@ function pumpUpgrade(
     upstreamSocket.pipe(clientSocket as NodeJS.WritableStream);
     (clientSocket as unknown as NodeJS.ReadableStream).pipe(upstreamSocket);
 
+    let teardown = false;
     const cleanup = (origin: string) => () => {
+      if (teardown) return;
+      teardown = true;
       console.log(`[ws-bridge] ${origin} ended`);
+      try {
+        upstreamSocket.unpipe(clientSocket as NodeJS.WritableStream);
+      } catch {
+        /* ignore */
+      }
+      try {
+        (clientSocket as unknown as NodeJS.ReadableStream).unpipe(upstreamSocket);
+      } catch {
+        /* ignore */
+      }
       try {
         upstreamSocket.destroy();
       } catch {
@@ -151,10 +265,21 @@ function pumpUpgrade(
       }
     };
 
+    // `pipe()` propagates `end` but not `error` or `close`, so without these
+    // listeners a half-broken socket would orphan the other side and leak
+    // a Docker-host FD until the process restarts. We hook all three on
+    // both sides and let the first one fire teardown.
     upstreamSocket.on("end", cleanup("upstream"));
+    upstreamSocket.on("close", cleanup("upstream-close"));
     upstreamSocket.on("error", (err) => {
       console.error("[ws-bridge] upstream socket error:", err.message);
       cleanup("upstream-error")();
+    });
+    clientSocket.on("end", cleanup("client"));
+    clientSocket.on("close", cleanup("client-close"));
+    clientSocket.on("error", (err) => {
+      console.error("[ws-bridge] client socket error:", err.message);
+      cleanup("client-error")();
     });
 
     console.log(`[ws-bridge] bridge live ${clientReq.url} ↔ ${upstreamHost}:${upstreamPort}${upstreamPath}`);
@@ -185,7 +310,52 @@ async function bootstrap() {
     });
 }
 
+/**
+ * Lightweight runtime instrumentation. The dev server has hung three times
+ * in a single session with port 3000 still LISTENING but every request
+ * timing out — classic event-loop starvation. These three signals make the
+ * next freeze diagnose itself instead of needing a hard restart:
+ *
+ *   1. `monitorEventLoopDelay()` records min/mean/max blocking time and we
+ *      log a warning when the mean climbs past 500 ms over a 5 s window.
+ *   2. `uncaughtException` / `unhandledRejection` become a single log line
+ *      (instead of silently killing whichever I/O cycle they fire under).
+ *   3. A periodic heartbeat log proves the loop is still alive even when
+ *      no requests are coming in — its absence in the next freeze pinpoints
+ *      the exact moment the loop wedged.
+ */
+function installRuntimeInstrumentation(): void {
+  process.on("uncaughtException", (err: Error) => {
+    console.error("[runtime] uncaughtException:", err.stack ?? err.message);
+  });
+  process.on("unhandledRejection", (reason) => {
+    const detail =
+      reason instanceof Error ? (reason.stack ?? reason.message) : String(reason);
+    console.error("[runtime] unhandledRejection:", detail);
+  });
+
+  if (env.NODE_ENV !== "production") {
+    const histogram = monitorEventLoopDelay({ resolution: 20 });
+    histogram.enable();
+
+    const intervalMs = 5_000;
+    const tick = setInterval(() => {
+      const meanMs = histogram.mean / 1e6;
+      const maxMs = histogram.max / 1e6;
+      const p99Ms = histogram.percentile(99) / 1e6;
+      histogram.reset();
+      // Always emit a one-line heartbeat so a freeze is visible by absence.
+      const tag = meanMs > 500 || maxMs > 2_000 ? "warn" : "log";
+      const line = `[runtime] loop heartbeat mean=${meanMs.toFixed(1)}ms p99=${p99Ms.toFixed(1)}ms max=${maxMs.toFixed(1)}ms`;
+      if (tag === "warn") console.warn(line);
+      else console.log(line);
+    }, intervalMs);
+    tick.unref(); // never keep the process alive on its own
+  }
+}
+
 (async () => {
+  installRuntimeInstrumentation();
   await app.prepare();
   await bootstrap();
 
@@ -257,7 +427,63 @@ async function bootstrap() {
       return;
     }
 
-    pumpUpgrade(req, socket as Socket, head, "127.0.0.1", vm.ports.novnc, "/websockify");
+    // Hold the upstream dial until websockify inside the container is
+    // listening. Without this, the browser sees a 1006 close during the
+    // cold-boot window and `@novnc/novnc` floods the console with
+    // `Connection closed (code: 1006)` errors — see commit message for
+    // context. The probe is cheap on warm reconnects (single immediate
+    // `connect`), so the happy path is unchanged.
+    const clientSocket = socket as Socket;
+    // Mirror the timeout/keepalive tuning that pumpUpgrade applies, so the
+    // socket isn't RST'd by Node's HTTP layer while we're waiting on the
+    // upstream probe.
+    clientSocket.setTimeout?.(0);
+    clientSocket.setKeepAlive?.(true, 30_000);
+    clientSocket.setNoDelay?.(true);
+
+    // Without this listener, a client-side socket error during the wait
+    // window would propagate as an `uncaughtException`. pumpUpgrade installs
+    // its own listener once the bridge is live; remove ours just before
+    // handing off so we don't double-log.
+    const preBridgeError = (err: Error) => {
+      if ((err as NodeJS.ErrnoException).code === "ECONNRESET") return;
+      console.warn(
+        `[ws-bridge] client socket error during pre-ready wait: ${err.message}`,
+      );
+    };
+    clientSocket.on("error", preBridgeError);
+
+    const upstreamState = await waitForUpstreamReady(
+      "127.0.0.1",
+      vm.ports.novnc,
+      clientSocket,
+    );
+
+    if (upstreamState === "client_gone") {
+      // Browser closed the WebSocket before we got an upstream connection;
+      // nothing more to do, the socket is already destroyed.
+      return;
+    }
+
+    if (upstreamState === "timeout") {
+      // Genuine failure: websockify never came up. Let the upgrade attempt
+      // fail so the UI's silent-retry budget eventually surfaces a real
+      // error to the user.
+      console.warn(
+        `[ws-bridge] upstream 127.0.0.1:${vm.ports.novnc} did not become ready in time; closing`,
+      );
+      try {
+        clientSocket.destroy();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
+    // Hand off to the byte-pump bridge. pumpUpgrade installs its own
+    // `error` listener, so remove ours to avoid double-logging.
+    clientSocket.off("error", preBridgeError);
+    pumpUpgrade(req, clientSocket, head, "127.0.0.1", vm.ports.novnc, "/websockify");
   });
 
   server.listen(port, hostname, () => {
