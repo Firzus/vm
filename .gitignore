@@ -10,3 +10,6 @@ Thumbs.db
 # MCP config — generated locally from .mcp.template.json (see scripts/sync-mcp.mjs)
 .mcp.json
 .cursor/mcp.json
+
+# Project-local skills
+.cursor/skills/
